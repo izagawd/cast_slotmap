@@ -1,0 +1,103 @@
+//! Castable-key wrappers over the [`slotmap`] crate's
+//! [`SlotMap`](slotmap::SlotMap) and [`DenseSlotMap`](slotmap::DenseSlotMap).
+//!
+//! This crate is to `slotmap::SlotMap` what `stable_gen_map`'s `StableCastMap`
+//! / `UnsafeCastMap` are to its `GenMap`: it stores type-erased heterogeneous
+//! values (e.g. `Box<dyn Any>`) and hands back typed [`CastKey`]s, so
+//! `map.get(key)` returns a correctly typed `&T` with no `downcast_ref` at the
+//! call site.
+//!
+//! Two axes, four maps. The **identity** axis is raw vs. checked; the
+//! **storage** axis is basic vs. dense:
+//!
+//! - [`UnsafeCastMap`] — raw, over [`slotmap::SlotMap`]. Typed lookups via
+//!   [`CastKey`], but `get` / `get_mut` / `remove` / `downcast_key` are
+//!   `unsafe` (no per-map identity check).
+//! - [`CastMap`] — the safe, recommended API over [`slotmap::SlotMap`]. Each map
+//!   gets a unique [`MapId`] on creation and every [`StableCastKey`] carries it,
+//!   so a key from map A used on map B returns `None` instead of being unsound.
+//! - [`UnsafeDenseCastMap`] / [`DenseCastMap`] — the same raw/checked pair over
+//!   [`slotmap::DenseSlotMap`], which stores values contiguously for fast
+//!   iteration (see [`UnsafeDenseCastMap`] for the storage trade-offs). The
+//!   cast-key API is identical to the basic maps', plus `detach` / `reattach`
+//!   (which only `DenseSlotMap` supports).
+//!
+//! All four maps support disjoint mutable access via `get_disjoint_mut` (typed,
+//! by [`CastKey`]) and `get_disjoint_mut_by_inner_key` (by backing key), each
+//! with an `unchecked` companion.
+//!
+//! For the common `Box` case use the aliases [`BoxCastMap`] / [`UnsafeBoxCastMap`]
+//! (and [`BoxDenseCastMap`] / [`UnsafeBoxDenseCastMap`]), typically with
+//! `dyn Any`: `BoxCastMap<DefaultKey, dyn Any>`.
+//!
+//! # Differences from a `stable_gen_map` cast map
+//! `slotmap::SlotMap::insert` takes `&mut self` (it is not a stable-reference,
+//! interior-mutability arena; `DenseSlotMap` is the same), so every mutating
+//! method here — `insert*`, `remove`, `reserve`, `clear`, `retain`, `drain` —
+//! takes `&mut self`. Because `get` borrows `&self` while `insert` borrows
+//! `&mut self`, references and inserts can never coexist; consequently the
+//! shared [`iter`](CastMap::iter) is plain safe (no `unsafe_iter`), `Clone` is a
+//! normal forward (no `unsafe_clone`/`clone_mut`), and there is no `get_slot`,
+//! `get_by_index_only`, or `reset` — `slotmap` exposes no such operations.
+//! `clear` is the native way to invalidate all keys.
+//!
+//! # Nightly
+//! Pointer-metadata reconstruction relies on the unstable `ptr_metadata`,
+//! `coerce_unsized`, and `unsize` features, so this crate requires a **nightly**
+//! toolchain. It is single-threaded in spirit, mirroring `slotmap::SlotMap`'s
+//! own `Send`/`Sync` behavior (which depends on the stored value).
+//!
+//! # Example
+//! ```ignore
+//! #![feature(ptr_metadata, coerce_unsized, unsize)]
+//! use cast_slotmap::{BoxCastMap, DefaultKey, StableCastKey};
+//! use std::any::Any;
+//!
+//! struct Dog { name: String }
+//!
+//! let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
+//!
+//! // Insert a concrete type into a `dyn Any` map; get a `Dog`-typed key back.
+//! let dog_key: StableCastKey<Dog> = map.insert_sized(Box::new(Dog { name: "Rex".into() }));
+//!
+//! // Upcast the key to its erased form, then downcast it back.
+//! let dyn_key: StableCastKey<dyn Any> = dog_key.upcast::<dyn Any>();
+//! let recovered: StableCastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
+//!
+//! assert_eq!(map.get(recovered).unwrap().name, "Rex");
+//! ```
+#![feature(ptr_metadata)]
+#![feature(coerce_unsized)]
+#![feature(unsize)]
+
+pub mod cast_key;
+pub mod cast_map;
+pub mod dense_cast_map;
+pub mod map_id;
+pub mod retype_ptr;
+pub mod unsafe_cast_map;
+pub mod unsafe_dense_cast_map;
+
+// Re-export the slotmap items callers need so they don't have to depend on
+// `slotmap` directly for the common path.
+pub use slotmap::{new_key_type, DefaultKey, Key, KeyData};
+
+#[doc(inline)]
+pub use cast_key::{CastKey, StableCastKey};
+#[doc(inline)]
+pub use cast_map::{BoxCastMap, CastMap};
+#[doc(inline)]
+pub use dense_cast_map::{BoxDenseCastMap, DenseCastMap};
+#[doc(inline)]
+pub use map_id::MapId;
+#[doc(inline)]
+pub use retype_ptr::RetypePtr;
+#[doc(no_inline)]
+pub use stable_deref_trait::StableDeref;
+#[doc(inline)]
+pub use unsafe_cast_map::{UnsafeBoxCastMap, UnsafeCastMap};
+#[doc(inline)]
+pub use unsafe_dense_cast_map::{UnsafeBoxDenseCastMap, UnsafeDenseCastMap};
+
+#[cfg(test)]
+mod tests;
