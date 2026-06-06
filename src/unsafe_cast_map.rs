@@ -1,5 +1,6 @@
-//! Low-level cast map generic over the backing `slotmap` map, without per-map
-//! identity checks.
+//! Low-level cast map generic over the backing `slotmap` map; its typed
+//! accessors are `unsafe` (the caller upholds the metadata contract spelled out
+//! below).
 //!
 //! [`UnsafeCastMapG`] is the single source of truth for the cast logic — the
 //! pointer-metadata reconstruction behind the typed `get` / `get_mut` /
@@ -797,12 +798,13 @@ where
 /// Raw castable-key map backed by [`slotmap::SlotMap`] (sparse storage).
 pub type UnsafeCastMap<K, Ptr> = UnsafeCastMapG<SlotMap<K, Ptr>>;
 
-/// Raw castable-key map backed by [`slotmap::DenseSlotMap`] (contiguous storage,
-/// fast iteration).
+/// Raw castable-key map backed by [`slotmap::DenseSlotMap`]: values are stored
+/// contiguously for fast iteration, at the cost of one extra indirection per
+/// lookup, and `remove` swaps the last element into the vacated position.
 pub type UnsafeDenseCastMap<K, Ptr> = UnsafeCastMapG<DenseSlotMap<K, Ptr>>;
 
-/// Convenience alias: [`UnsafeCastMap`] storing `Box<T>` (e.g. `dyn Any`).
+/// Convenience alias: [`UnsafeCastMap`] storing `Box<T>`
 pub type UnsafeBoxCastMap<K, T> = UnsafeCastMap<K, Box<T>>;
 
-/// Convenience alias: [`UnsafeDenseCastMap`] storing `Box<T>` (e.g. `dyn Any`).
+/// Convenience alias: [`UnsafeDenseCastMap`] storing `Box<T>`
 pub type UnsafeBoxDenseCastMap<K, T> = UnsafeDenseCastMap<K, Box<T>>;

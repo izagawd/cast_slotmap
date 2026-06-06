@@ -8,9 +8,12 @@
 //! Two axes, four maps. The **identity** axis is raw vs. checked; the
 //! **storage** axis is basic vs. dense:
 //!
-//! - [`UnsafeCastMap`] — raw, over [`slotmap::SlotMap`]. Typed lookups via
-//!   [`CastKey`], but `get` / `get_mut` / `remove` / `downcast_key` are
-//!   `unsafe` (no per-map identity check).
+//! - [`UnsafeCastMap`] — the low-level map over [`slotmap::SlotMap`]. Lookups
+//!   are typed via [`CastKey`], but `get` / `get_mut` / `remove` /
+//!   `downcast_key` are `unsafe`: they rebuild the typed reference from the
+//!   key's cached metadata without checking it still matches the value in the
+//!   slot, so using a key whose slot holds a different type is undefined
+//!   behavior.
 //! - [`CastMap`] — the safe, recommended API over [`slotmap::SlotMap`]. Each map
 //!   gets a unique [`MapId`] on creation and every [`StableCastKey`] carries it,
 //!   so a key from map A used on map B returns `None` instead of being unsound.
