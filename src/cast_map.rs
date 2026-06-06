@@ -1,9 +1,17 @@
-//! Safe wrapper around [`UnsafeCastMap`](crate::unsafe_cast_map::UnsafeCastMap)
+//! Safe wrapper around [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG)
 //! that binds keys to the map that created them via a [`MapId`].
+//!
+//! [`CastMapG`] is generic over the backing `slotmap` map `M`
+//! ([`slotmap::SlotMap`] or [`slotmap::DenseSlotMap`]); the backing key and
+//! stored pointer types are read off `M` as `M::Key` and `M::Value`. The
+//! concrete maps are exposed as aliases: [`CastMap`] (sparse) and
+//! [`DenseCastMap`] (dense), plus the `Box`-storing [`BoxCastMap`] /
+//! [`BoxDenseCastMap`]. `detach` / `reattach` are available on every map, since
+//! `slotmap` supports them on `SlotMap` and `DenseSlotMap` alike.
 //!
 //! Every [`StableCastKey`](crate::cast_key::StableCastKey) carries the map's
 //! identity. Keyed lookups check the id before touching pointer metadata, so a
-//! key from map A used on map B returns `None` instead of being unsound.
+//! key from one map used on a different one returns `None` instead of being unsound.
 //!
 //! Soundness, briefly: a `StableCastKey` that passes both the [`MapId`] check
 //! and `slotmap`'s slot-version check provably refers to the exact value that
@@ -13,13 +21,14 @@ use std::any::Any;
 use std::ops::{Deref, DerefMut};
 use std::ptr::Pointee;
 
-use slotmap::Key;
+use slotmap::{DenseSlotMap, Key, SlotMap};
 
+use crate::backend::{MTarget, SlotMapTrait};
 use crate::cast_key::{CastKey, StableCastKey};
 use crate::map_id::MapId;
 use crate::retype_ptr::RetypePtr;
 use stable_deref_trait::StableDeref;
-use crate::unsafe_cast_map::{self, UnsafeCastMap};
+use crate::unsafe_cast_map::{self, UnsafeCastMapG};
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -31,27 +40,26 @@ where
     StableCastKey { inner: key, map_id }
 }
 
-// ─── CastMap ─────────────────────────────────────────────────────────────
+// ─── CastMapG ──────────────────────────────────────────────────────────────────
 
-/// A safe wrapper around [`UnsafeCastMap`] that checks a per-map [`MapId`]
-/// on every keyed access.
+/// A safe wrapper around [`UnsafeCastMapG`] that checks a per-map [`MapId`] on
+/// every keyed access.
 ///
-/// `Ptr` is the stored smart pointer (e.g. `Box<dyn Any>`). Use the alias
-/// [`BoxCastMap`] for the common `Box` case.
-pub struct CastMap<K: Key, Ptr>
-where
-    Ptr: StableDeref,
-{
-    inner: UnsafeCastMap<K, Ptr>,
+/// Its one type parameter is the backing `slotmap` map `M`; the stored smart
+/// pointer is `M::Value` (e.g. `Box<dyn Any>`) and the output type is
+/// `<M::Value as Deref>::Target`. Use the aliases [`CastMap`] / [`DenseCastMap`]
+/// (or the `Box` forms [`BoxCastMap`] / [`BoxDenseCastMap`]) rather than naming
+/// `M` directly.
+pub struct CastMapG<M> {
+    inner: UnsafeCastMapG<M>,
     map_id: MapId,
 }
 
 // ─── Clone ───────────────────────────────────────────────────────────────────
 
-impl<K: Key, Ptr> Clone for CastMap<K, Ptr>
+impl<M> Clone for CastMapG<M>
 where
-    Ptr: StableDeref,
-    UnsafeCastMap<K, Ptr>: Clone,
+    M: SlotMapTrait + Clone,
 {
     /// Clones the map. The clone receives a **fresh** map identity, so keys from
     /// the original are not valid on the clone (use iteration to obtain new
@@ -71,26 +79,28 @@ where
     }
 }
 
-impl<K: Key, Ptr> Default for CastMap<K, Ptr>
+impl<M> Default for CastMapG<M>
 where
-    Ptr: StableDeref,
+    M: SlotMapTrait,
+    M::Value: StableDeref,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-// ─── Basic methods ───────────────────────────────────────────────────────────
+// ─── Basic methods ─────────────────────────────────────────────────────────────
 
-impl<K: Key, Ptr> CastMap<K, Ptr>
+impl<M> CastMapG<M>
 where
-    Ptr: StableDeref,
+    M: SlotMapTrait,
+    M::Value: StableDeref,
 {
     /// Creates a new, empty map with a fresh [`MapId`].
     #[inline]
     pub fn new() -> Self {
         Self {
-            inner: UnsafeCastMap::new(),
+            inner: UnsafeCastMapG::new(),
             map_id: MapId::next(),
         }
     }
@@ -99,7 +109,7 @@ where
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            inner: UnsafeCastMap::with_capacity(capacity),
+            inner: UnsafeCastMapG::with_capacity(capacity),
             map_id: MapId::next(),
         }
     }
@@ -149,7 +159,7 @@ where
     /// Returns whether the key is still live in *this* map. A key from another
     /// map (mismatched [`MapId`]) returns `false`.
     #[inline]
-    pub fn contains_key<T: ?Sized + Pointee>(&self, key: StableCastKey<T, K>) -> bool
+    pub fn contains_key<T: ?Sized + Pointee>(&self, key: StableCastKey<T, M::Key>) -> bool
     where
         <T as Pointee>::Metadata: Copy,
     {
@@ -158,60 +168,111 @@ where
 
     // ── inner accessors ───────────────────────────────────────────────────
 
-    /// Consumes this map and returns the underlying [`UnsafeCastMap`].
+    /// Consumes this map and returns the underlying [`UnsafeCastMapG`].
     #[inline]
-    pub fn inner(self) -> UnsafeCastMap<K, Ptr> {
+    pub fn inner(self) -> UnsafeCastMapG<M> {
         self.inner
     }
 
-    /// Returns a shared reference to the underlying [`UnsafeCastMap`].
+    /// Returns a shared reference to the underlying [`UnsafeCastMapG`].
     #[inline]
-    pub fn inner_ref(&self) -> &UnsafeCastMap<K, Ptr> {
+    pub fn inner_ref(&self) -> &UnsafeCastMapG<M> {
         &self.inner
     }
 
-    /// Returns a mutable reference to the underlying [`UnsafeCastMap`].
+    /// Returns a mutable reference to the underlying [`UnsafeCastMapG`].
     #[inline]
-    pub fn inner_mut(&mut self) -> &mut UnsafeCastMap<K, Ptr> {
+    pub fn inner_mut(&mut self) -> &mut UnsafeCastMapG<M> {
         &mut self.inner
     }
 
-    // ── backing-key access (no map-id check) ──────────────────────────────
+    // ── backing-key access (no map-id check) ───────────────────────────────
 
     /// Shared-reference lookup using the backing `slotmap` key directly.
     #[inline]
-    pub fn get_by_inner_key(&self, key: K) -> Option<&Ptr::Target> {
+    pub fn get_by_inner_key(&self, key: M::Key) -> Option<&MTarget<M>> {
         self.inner.get_by_inner_key(key)
     }
 
     /// Removes an element by its backing `slotmap` key.
     #[inline]
-    pub fn remove_by_inner_key(&mut self, key: K) -> Option<Ptr> {
+    pub fn remove_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
         self.inner.remove_by_inner_key(key)
     }
 
     /// Shared iterator over output references only.
     #[inline]
-    pub fn values(&self) -> impl Iterator<Item = &Ptr::Target> + '_ {
+    pub fn values(&self) -> impl Iterator<Item = &MTarget<M>> + '_ {
         self.inner.values()
+    }
+}
+
+// ─── Backing-key detach / reattach ────────────────────────
+
+impl<M> CastMapG<M>
+where
+    M: SlotMapTrait,
+    M::Value: StableDeref,
+{
+    /// Detaches an element by its backing `slotmap` key, returning the pointer
+    /// but keeping the slot reservable. Pairs with
+    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key). Backing keys
+    /// bypass the map-id check, like [`remove_by_inner_key`](Self::remove_by_inner_key).
+    #[inline]
+    pub fn detach_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
+        self.inner.detach_by_inner_key(key)
+    }
+
+    /// Reattaches an already-erased `value` at a detached slot, reusing `key`.
+    ///
+    /// # Panics
+    /// Panics if `key` is not detached or the map is full.
+    #[inline]
+    pub fn reattach_by_inner_key(&mut self, key: M::Key, value: M::Value) {
+        self.inner.reattach_by_inner_key(key, value);
+    }
+
+    /// Reattaches a sized smart pointer (e.g. `Box<Dog>`) at a slot freed with
+    /// [`detach`](Self::detach), reusing `key`. Returns `false` and does nothing
+    /// if the key belongs to a different map; otherwise reattaches and returns
+    /// `true`.
+    ///
+    /// # Panics
+    /// Panics if `key` is from this map but not detached, or the map is full.
+    #[inline]
+    pub fn reattach_sized<ConcretePtr>(
+        &mut self,
+        key: StableCastKey<ConcretePtr::Target, M::Key>,
+        value: ConcretePtr,
+    ) -> bool
+    where
+        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        ConcretePtr::Target: Sized,
+    {
+        if key.map_id != self.map_id {
+            return false;
+        }
+        self.inner.reattach_sized(key.inner, value);
+        true
     }
 }
 
 // ── backing-key access requiring `&mut Output` ───────────────────────────────
 
-impl<K: Key, Ptr> CastMap<K, Ptr>
+impl<M> CastMapG<M>
 where
-    Ptr: StableDeref + DerefMut,
+    M: SlotMapTrait,
+    M::Value: StableDeref + DerefMut,
 {
     /// Mutable-reference lookup using the backing `slotmap` key directly.
     #[inline]
-    pub fn get_by_inner_key_mut(&mut self, key: K) -> Option<&mut Ptr::Target> {
+    pub fn get_by_inner_key_mut(&mut self, key: M::Key) -> Option<&mut MTarget<M>> {
         self.inner.get_by_inner_key_mut(key)
     }
 
     /// Mutable iterator over output references only.
     #[inline]
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Ptr::Target> + '_ {
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut MTarget<M>> + '_ {
         self.inner.values_mut()
     }
 
@@ -222,8 +283,8 @@ where
     #[inline]
     pub fn get_disjoint_mut_by_inner_key<const N: usize>(
         &mut self,
-        keys: [K; N],
-    ) -> Option<[&mut Ptr::Target; N]> {
+        keys: [M::Key; N],
+    ) -> Option<[&mut MTarget<M>; N]> {
         self.inner.get_disjoint_mut_by_inner_key(keys)
     }
 
@@ -235,19 +296,20 @@ where
     #[inline]
     pub unsafe fn get_disjoint_unchecked_mut_by_inner_key<const N: usize>(
         &mut self,
-        keys: [K; N],
-    ) -> [&mut Ptr::Target; N] {
+        keys: [M::Key; N],
+    ) -> [&mut MTarget<M>; N] {
         self.inner.get_disjoint_unchecked_mut_by_inner_key(keys)
     }
 }
 
 // ─── Core operations (require pointer metadata) ──────────────────────────────
 
-impl<K: Key, Ptr> CastMap<K, Ptr>
+impl<M> CastMapG<M>
 where
-    Ptr: StableDeref,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait,
+    M::Value: StableDeref,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
     /// Attempts to downcast a `StableCastKey<dyn Any>` to a concrete type.
     /// Returns `None` if the key belongs to a different map or the type doesn't
@@ -255,8 +317,8 @@ where
     #[inline]
     pub fn downcast_key<Concrete: 'static>(
         &self,
-        key: StableCastKey<dyn Any, K>,
-    ) -> Option<StableCastKey<Concrete, K>> {
+        key: StableCastKey<dyn Any, M::Key>,
+    ) -> Option<StableCastKey<Concrete, M::Key>> {
         if key.map_id != self.map_id {
             return None;
         }
@@ -268,7 +330,7 @@ where
 
     /// Inserts a value and returns its [`StableCastKey`].
     #[inline]
-    pub fn insert(&mut self, value: Ptr) -> StableCastKey<Ptr::Target, K> {
+    pub fn insert(&mut self, value: M::Value) -> StableCastKey<MTarget<M>, M::Key> {
         let key = self.inner.insert(value);
         stabilize(key, self.map_id)
     }
@@ -277,8 +339,8 @@ where
     #[inline]
     pub fn insert_with_key(
         &mut self,
-        func: impl FnOnce(K) -> Ptr,
-    ) -> StableCastKey<Ptr::Target, K> {
+        func: impl FnOnce(M::Key) -> M::Value,
+    ) -> StableCastKey<MTarget<M>, M::Key> {
         let key = self.inner.insert_with_key(func);
         stabilize(key, self.map_id)
     }
@@ -287,8 +349,8 @@ where
     #[inline]
     pub fn try_insert_with_key<E>(
         &mut self,
-        func: impl FnOnce(K) -> Result<Ptr, E>,
-    ) -> Result<StableCastKey<Ptr::Target, K>, E> {
+        func: impl FnOnce(M::Key) -> Result<M::Value, E>,
+    ) -> Result<StableCastKey<MTarget<M>, M::Key>, E> {
         let key = self.inner.try_insert_with_key(func)?;
         Ok(stabilize(key, self.map_id))
     }
@@ -300,9 +362,9 @@ where
     pub fn insert_sized<ConcretePtr>(
         &mut self,
         value: ConcretePtr,
-    ) -> StableCastKey<ConcretePtr::Target, K>
+    ) -> StableCastKey<ConcretePtr::Target, M::Key>
     where
-        ConcretePtr: std::ops::CoerceUnsized<Ptr> + Deref,
+        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
         ConcretePtr::Target: Sized,
     {
         let key = self.inner.insert_sized(value);
@@ -314,10 +376,10 @@ where
     #[inline]
     pub fn insert_sized_with_key<ConcretePtr>(
         &mut self,
-        func: impl FnOnce(StableCastKey<ConcretePtr::Target, K>) -> ConcretePtr,
-    ) -> StableCastKey<ConcretePtr::Target, K>
+        func: impl FnOnce(StableCastKey<ConcretePtr::Target, M::Key>) -> ConcretePtr,
+    ) -> StableCastKey<ConcretePtr::Target, M::Key>
     where
-        ConcretePtr: std::ops::CoerceUnsized<Ptr> + Deref,
+        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
         ConcretePtr::Target: Sized,
     {
         let map_id = self.map_id;
@@ -331,10 +393,10 @@ where
     #[inline]
     pub fn try_insert_sized_with_key<ConcretePtr, E>(
         &mut self,
-        func: impl FnOnce(StableCastKey<ConcretePtr::Target, K>) -> Result<ConcretePtr, E>,
-    ) -> Result<StableCastKey<ConcretePtr::Target, K>, E>
+        func: impl FnOnce(StableCastKey<ConcretePtr::Target, M::Key>) -> Result<ConcretePtr, E>,
+    ) -> Result<StableCastKey<ConcretePtr::Target, M::Key>, E>
     where
-        ConcretePtr: std::ops::CoerceUnsized<Ptr> + Deref,
+        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
         ConcretePtr::Target: Sized,
     {
         let map_id = self.map_id;
@@ -344,16 +406,16 @@ where
         Ok(stabilize(key, self.map_id))
     }
 
-    // ── insert_as ──────────────────────────────────────────────────────────
+    // ── insert_as ─────────────────────────────────────────────────────────
 
     /// Inserts a smart pointer, preserving the source pointer's metadata.
     #[inline]
     pub fn insert_as<SourcePtr>(
         &mut self,
         value: SourcePtr,
-    ) -> StableCastKey<SourcePtr::Target, K>
+    ) -> StableCastKey<SourcePtr::Target, M::Key>
     where
-        SourcePtr: std::ops::CoerceUnsized<Ptr> + Deref,
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
         let key = self.inner.insert_as(value);
@@ -364,10 +426,10 @@ where
     #[inline]
     pub fn insert_as_with_key<SourcePtr>(
         &mut self,
-        func: impl FnOnce(K) -> SourcePtr,
-    ) -> StableCastKey<SourcePtr::Target, K>
+        func: impl FnOnce(M::Key) -> SourcePtr,
+    ) -> StableCastKey<SourcePtr::Target, M::Key>
     where
-        SourcePtr: std::ops::CoerceUnsized<Ptr> + Deref,
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
         let key = self.inner.insert_as_with_key(func);
@@ -378,23 +440,23 @@ where
     #[inline]
     pub fn try_insert_as_with_key<SourcePtr, E>(
         &mut self,
-        func: impl FnOnce(K) -> Result<SourcePtr, E>,
-    ) -> Result<StableCastKey<SourcePtr::Target, K>, E>
+        func: impl FnOnce(M::Key) -> Result<SourcePtr, E>,
+    ) -> Result<StableCastKey<SourcePtr::Target, M::Key>, E>
     where
-        SourcePtr: std::ops::CoerceUnsized<Ptr> + Deref,
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
         let key = self.inner.try_insert_as_with_key(func)?;
         Ok(stabilize(key, self.map_id))
     }
 
-    // ── cast_key_of ────────────────────────────────────────────────────────
+    // ── cast_key_of ───────────────────────────────────────────────────────
 
     /// Converts a backing `slotmap` key into a [`StableCastKey`] by reading
     /// pointer metadata from the stored value. Returns `None` if the key is
     /// stale.
     #[inline]
-    pub fn cast_key_of(&self, key: K) -> Option<StableCastKey<Ptr::Target, K>> {
+    pub fn cast_key_of(&self, key: M::Key) -> Option<StableCastKey<MTarget<M>, M::Key>> {
         let key = self.inner.cast_key_of(key)?;
         Some(stabilize(key, self.map_id))
     }
@@ -404,7 +466,7 @@ where
     /// Typed lookup by [`StableCastKey`]. Returns `None` if the key belongs to
     /// a different map or the slot is no longer occupied.
     #[inline]
-    pub fn get<T: ?Sized + Pointee>(&self, key: StableCastKey<T, K>) -> Option<&T>
+    pub fn get<T: ?Sized + Pointee>(&self, key: StableCastKey<T, M::Key>) -> Option<&T>
     where
         <T as Pointee>::Metadata: Copy,
     {
@@ -420,7 +482,7 @@ where
     /// - The key's slot must be occupied with the matching version.
     /// - The key's pointer metadata must be valid for the data in that slot.
     #[inline]
-    pub unsafe fn get_unchecked<T: ?Sized + Pointee>(&self, key: StableCastKey<T, K>) -> &T
+    pub unsafe fn get_unchecked<T: ?Sized + Pointee>(&self, key: StableCastKey<T, M::Key>) -> &T
     where
         <T as Pointee>::Metadata: Copy,
     {
@@ -432,11 +494,11 @@ where
     #[inline]
     pub fn remove<'a, T: ?Sized + Pointee>(
         &mut self,
-        key: StableCastKey<T, K>,
-    ) -> Option<<Ptr as RetypePtr<'a>>::Retyped<T>>
+        key: StableCastKey<T, M::Key>,
+    ) -> Option<<M::Value as RetypePtr<'a>>::Retyped<T>>
     where
         <T as Pointee>::Metadata: Copy,
-        Ptr: RetypePtr<'a>,
+        M::Value: RetypePtr<'a>,
     {
         if key.map_id != self.map_id {
             return None;
@@ -444,29 +506,29 @@ where
         unsafe { self.inner.remove(key.inner) }
     }
 
-    // ── iterators ────────────────────────────────────────────────────────
+    // ── iterators ─────────────────────────────────────────────────────────
 
     /// Lazy iterator over all [`StableCastKey`]s.
     #[inline]
-    pub fn keys(&self) -> impl Iterator<Item = StableCastKey<Ptr::Target, K>> + '_ {
+    pub fn keys(&self) -> impl Iterator<Item = StableCastKey<MTarget<M>, M::Key>> + '_ {
         let map_id = self.map_id;
         self.inner.keys().map(move |ck| stabilize(ck, map_id))
     }
 
     /// Shared iterator over all occupied `(StableCastKey, &output)` pairs.
     #[inline]
-    pub fn iter(&self) -> Iter<'_, K, Ptr> {
+    pub fn iter(&self) -> Iter<'_, M> {
         Iter {
             inner: self.inner.iter(),
             map_id: self.map_id,
         }
     }
 
-    // ── drain ────────────────────────────────────────────────────────────
+    // ── drain ─────────────────────────────────────────────────────────────
 
     /// Draining iterator. Removes all elements and yields them.
     #[inline]
-    pub fn drain(&mut self) -> Drain<'_, K, Ptr> {
+    pub fn drain(&mut self) -> Drain<'_, M> {
         Drain {
             inner: self.inner.drain(),
             map_id: self.map_id,
@@ -474,17 +536,47 @@ where
     }
 }
 
+// ─── Typed detach ──────────────────────────────
+
+impl<M> CastMapG<M>
+where
+    M: SlotMapTrait,
+    M::Value: StableDeref,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
+{
+    /// Detaches an element by its [`StableCastKey`], returning the owned smart
+    /// pointer re-typed to `T` (a `Box<dyn Any>` map hands back a `Box<T>`) and
+    /// keeping the slot reservable. Returns `None` if the key belongs to a
+    /// different map. Pairs with the `reattach` methods.
+    #[inline]
+    pub fn detach<'a, T: ?Sized + Pointee>(
+        &mut self,
+        key: StableCastKey<T, M::Key>,
+    ) -> Option<<M::Value as RetypePtr<'a>>::Retyped<T>>
+    where
+        <T as Pointee>::Metadata: Copy,
+        M::Value: RetypePtr<'a>,
+    {
+        if key.map_id != self.map_id {
+            return None;
+        }
+        unsafe { self.inner.detach(key.inner) }
+    }
+}
+
 // ─── Core operations requiring `&mut Output` ─────────────────────────────────
 
-impl<K: Key, Ptr> CastMap<K, Ptr>
+impl<M> CastMapG<M>
 where
-    Ptr: StableDeref + DerefMut,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait,
+    M::Value: StableDeref + DerefMut,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
     /// Mutable typed lookup by [`StableCastKey`].
     #[inline]
-    pub fn get_mut<T: ?Sized + Pointee>(&mut self, key: StableCastKey<T, K>) -> Option<&mut T>
+    pub fn get_mut<T: ?Sized + Pointee>(&mut self, key: StableCastKey<T, M::Key>) -> Option<&mut T>
     where
         <T as Pointee>::Metadata: Copy,
     {
@@ -502,7 +594,7 @@ where
     #[inline]
     pub unsafe fn get_unchecked_mut<T: ?Sized + Pointee>(
         &mut self,
-        key: StableCastKey<T, K>,
+        key: StableCastKey<T, M::Key>,
     ) -> &mut T
     where
         <T as Pointee>::Metadata: Copy,
@@ -514,7 +606,7 @@ where
     #[inline]
     pub fn retain<F>(&mut self, mut f: F)
     where
-        F: FnMut(StableCastKey<Ptr::Target, K>, &mut Ptr::Target) -> bool,
+        F: FnMut(StableCastKey<MTarget<M>, M::Key>, &mut MTarget<M>) -> bool,
     {
         let map_id = self.map_id;
         self.inner.retain(|ck, val| f(stabilize(ck, map_id), val));
@@ -522,7 +614,7 @@ where
 
     /// Mutable iterator over all occupied `(StableCastKey, &mut output)` pairs.
     #[inline]
-    pub fn iter_mut(&mut self) -> IterMut<'_, K, Ptr> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, M> {
         IterMut {
             inner: self.inner.iter_mut(),
             map_id: self.map_id,
@@ -535,7 +627,7 @@ where
     #[inline]
     pub fn get_disjoint_mut<T: ?Sized + Pointee, const N: usize>(
         &mut self,
-        keys: [StableCastKey<T, K>; N],
+        keys: [StableCastKey<T, M::Key>; N],
     ) -> Option<[&mut T; N]>
     where
         <T as Pointee>::Metadata: Copy,
@@ -556,7 +648,7 @@ where
     #[inline]
     pub unsafe fn get_disjoint_unchecked_mut<T: ?Sized + Pointee, const N: usize>(
         &mut self,
-        keys: [StableCastKey<T, K>; N],
+        keys: [StableCastKey<T, M::Key>; N],
     ) -> [&mut T; N]
     where
         <T as Pointee>::Metadata: Copy,
@@ -566,57 +658,56 @@ where
     }
 }
 
-// ─── Index / IndexMut ────────────────────────────────────────────────────────
+// ─── Index / IndexMut ──────────────────────────────────────────────────────────
 
-impl<K: Key, Ptr> std::ops::Index<StableCastKey<Ptr::Target, K>> for CastMap<K, Ptr>
+impl<M> std::ops::Index<StableCastKey<MTarget<M>, M::Key>> for CastMapG<M>
 where
-    Ptr: StableDeref,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait,
+    M::Value: StableDeref,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    type Output = Ptr::Target;
+    type Output = MTarget<M>;
 
     #[inline]
-    fn index(&self, key: StableCastKey<Ptr::Target, K>) -> &Self::Output {
+    fn index(&self, key: StableCastKey<MTarget<M>, M::Key>) -> &Self::Output {
         self.get(key).expect("invalid StableCastKey for this map")
     }
 }
 
-impl<K: Key, Ptr> std::ops::IndexMut<StableCastKey<Ptr::Target, K>> for CastMap<K, Ptr>
+impl<M> std::ops::IndexMut<StableCastKey<MTarget<M>, M::Key>> for CastMapG<M>
 where
-    Ptr: StableDeref + DerefMut,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait,
+    M::Value: StableDeref + DerefMut,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
     #[inline]
-    fn index_mut(&mut self, key: StableCastKey<Ptr::Target, K>) -> &mut Self::Output {
+    fn index_mut(&mut self, key: StableCastKey<MTarget<M>, M::Key>) -> &mut Self::Output {
         self.get_mut(key)
             .expect("invalid StableCastKey for this map")
     }
 }
 
-/// Convenience alias: [`CastMap`] storing `Box<T>` (e.g. `dyn Any`).
-pub type BoxCastMap<K, T> = CastMap<K, Box<T>>;
-
 // ─── Iter (shared) ───────────────────────────────────────────────────────────
 
-pub struct Iter<'a, K: Key, Ptr: StableDeref>
+pub struct Iter<'a, M>
 where
-    K: 'a,
-    Ptr: 'a,
+    M: SlotMapTrait + 'a,
+    M::Value: 'a,
 {
-    inner: unsafe_cast_map::Iter<'a, K, Ptr>,
+    inner: unsafe_cast_map::Iter<'a, M>,
     map_id: MapId,
 }
 
-impl<'a, K: Key, Ptr> Iterator for Iter<'a, K, Ptr>
+impl<'a, M> Iterator for Iter<'a, M>
 where
-    K: 'a,
-    Ptr: StableDeref + 'a,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait + 'a,
+    M::Value: StableDeref + 'a,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    type Item = (StableCastKey<Ptr::Target, K>, &'a Ptr::Target);
+    type Item = (StableCastKey<MTarget<M>, M::Key>, &'a MTarget<M>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -632,23 +723,23 @@ where
 
 // ─── IterMut ─────────────────────────────────────────────────────────────────
 
-pub struct IterMut<'a, K: Key, Ptr: StableDeref>
+pub struct IterMut<'a, M>
 where
-    K: 'a,
-    Ptr: 'a,
+    M: SlotMapTrait + 'a,
+    M::Value: 'a,
 {
-    inner: unsafe_cast_map::IterMut<'a, K, Ptr>,
+    inner: unsafe_cast_map::IterMut<'a, M>,
     map_id: MapId,
 }
 
-impl<'a, K: Key, Ptr> Iterator for IterMut<'a, K, Ptr>
+impl<'a, M> Iterator for IterMut<'a, M>
 where
-    K: 'a,
-    Ptr: StableDeref + DerefMut + 'a,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait + 'a,
+    M::Value: StableDeref + DerefMut + 'a,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    type Item = (StableCastKey<Ptr::Target, K>, &'a mut Ptr::Target);
+    type Item = (StableCastKey<MTarget<M>, M::Key>, &'a mut MTarget<M>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -664,23 +755,23 @@ where
 
 // ─── Drain ───────────────────────────────────────────────────────────────────
 
-pub struct Drain<'a, K: Key, Ptr: StableDeref>
+pub struct Drain<'a, M>
 where
-    K: 'a,
-    Ptr: 'a,
+    M: SlotMapTrait + 'a,
+    M::Value: 'a,
 {
-    inner: unsafe_cast_map::Drain<'a, K, Ptr>,
+    inner: unsafe_cast_map::Drain<'a, M>,
     map_id: MapId,
 }
 
-impl<'a, K: Key, Ptr> Iterator for Drain<'a, K, Ptr>
+impl<'a, M> Iterator for Drain<'a, M>
 where
-    K: 'a,
-    Ptr: StableDeref + 'a,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait + 'a,
+    M::Value: StableDeref + 'a,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    type Item = (StableCastKey<Ptr::Target, K>, Ptr);
+    type Item = (StableCastKey<MTarget<M>, M::Key>, M::Value);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -696,18 +787,22 @@ where
 
 // ─── IntoIter (owning) ───────────────────────────────────────────────────────
 
-pub struct IntoIter<K: Key, Ptr: StableDeref> {
-    inner: unsafe_cast_map::IntoIter<K, Ptr>,
+pub struct IntoIter<M>
+where
+    M: SlotMapTrait,
+{
+    inner: unsafe_cast_map::IntoIter<M>,
     map_id: MapId,
 }
 
-impl<K: Key, Ptr> Iterator for IntoIter<K, Ptr>
+impl<M> Iterator for IntoIter<M>
 where
-    Ptr: StableDeref,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait,
+    M::Value: StableDeref,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    type Item = (StableCastKey<Ptr::Target, K>, Ptr);
+    type Item = (StableCastKey<MTarget<M>, M::Key>, M::Value);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -721,14 +816,15 @@ where
     }
 }
 
-impl<K: Key, Ptr> IntoIterator for CastMap<K, Ptr>
+impl<M> IntoIterator for CastMapG<M>
 where
-    Ptr: StableDeref,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait,
+    M::Value: StableDeref,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    type Item = (StableCastKey<Ptr::Target, K>, Ptr);
-    type IntoIter = IntoIter<K, Ptr>;
+    type Item = (StableCastKey<MTarget<M>, M::Key>, M::Value);
+    type IntoIter = IntoIter<M>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -739,15 +835,15 @@ where
     }
 }
 
-impl<'a, K: Key, Ptr> IntoIterator for &'a CastMap<K, Ptr>
+impl<'a, M> IntoIterator for &'a CastMapG<M>
 where
-    K: 'a,
-    Ptr: StableDeref + 'a,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait + 'a,
+    M::Value: StableDeref + 'a,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    type Item = (StableCastKey<Ptr::Target, K>, &'a Ptr::Target);
-    type IntoIter = Iter<'a, K, Ptr>;
+    type Item = (StableCastKey<MTarget<M>, M::Key>, &'a MTarget<M>);
+    type IntoIter = Iter<'a, M>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -755,18 +851,33 @@ where
     }
 }
 
-impl<'a, K: Key, Ptr> IntoIterator for &'a mut CastMap<K, Ptr>
+impl<'a, M> IntoIterator for &'a mut CastMapG<M>
 where
-    K: 'a,
-    Ptr: StableDeref + DerefMut + 'a,
-    Ptr::Target: Pointee,
-    <Ptr::Target as Pointee>::Metadata: Copy,
+    M: SlotMapTrait + 'a,
+    M::Value: StableDeref + DerefMut + 'a,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    type Item = (StableCastKey<Ptr::Target, K>, &'a mut Ptr::Target);
-    type IntoIter = IterMut<'a, K, Ptr>;
+    type Item = (StableCastKey<MTarget<M>, M::Key>, &'a mut MTarget<M>);
+    type IntoIter = IterMut<'a, M>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
     }
 }
+
+// ─── Type aliases ──────────────────────────────────────────────────────────────
+
+/// Safe castable-key map backed by [`slotmap::SlotMap`] (sparse storage).
+pub type CastMap<K, Ptr> = CastMapG<SlotMap<K, Ptr>>;
+
+/// Safe castable-key map backed by [`slotmap::DenseSlotMap`] (contiguous
+/// storage, fast iteration; additionally supports `detach` / `reattach`).
+pub type DenseCastMap<K, Ptr> = CastMapG<DenseSlotMap<K, Ptr>>;
+
+/// Convenience alias: [`CastMap`] storing `Box<T>` (e.g. `dyn Any`).
+pub type BoxCastMap<K, T> = CastMap<K, Box<T>>;
+
+/// Convenience alias: [`DenseCastMap`] storing `Box<T>` (e.g. `dyn Any`).
+pub type BoxDenseCastMap<K, T> = DenseCastMap<K, Box<T>>;

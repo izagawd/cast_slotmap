@@ -329,8 +329,8 @@ mod dense {
     use std::any::Any;
 
     use super::{Cat, Dog};
-    use crate::dense_cast_map::BoxDenseCastMap;
-    use crate::unsafe_dense_cast_map::UnsafeBoxDenseCastMap;
+    use crate::cast_map::BoxDenseCastMap;
+    use crate::unsafe_cast_map::UnsafeBoxDenseCastMap;
     use crate::cast_key::StableCastKey;
     use crate::DefaultKey;
 

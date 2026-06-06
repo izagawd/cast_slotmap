@@ -25,6 +25,12 @@ Two axes — **identity** (raw vs. checked) and **storage** (basic vs. dense):
   (one extra indirection per lookup; `remove` reorders the survivors). The
   cast-key API is identical.
 
+These four are thin **type aliases**. Internally there are just two generic
+types — `UnsafeCastMapG<M>` and `CastMapG<M>` — parameterized
+over a backing map `M: SlotMapTrait` (implemented for both `SlotMap` and
+`DenseSlotMap`). `detach` / `reattach` are part of `SlotMapTrait` — `slotmap`
+supports them on both maps — so they're available on all four aliases.
+
 For the common case use the `Box` aliases — `BoxCastMap<K, T>` /
 `UnsafeBoxCastMap<K, T>` and `BoxDenseCastMap<K, T>` /
 `UnsafeBoxDenseCastMap<K, T>` — typically with `dyn Any`.
@@ -77,12 +83,12 @@ the underlying map mutates: `insert_sized` / `insert_as` (+ `_with_key` /
 `IntoIterator` (owned / `&` / `&mut`).
 
 All four maps also offer disjoint mutable access — `get_disjoint_mut` (typed) and
-`get_disjoint_mut_by_inner_key`, each with an `unchecked` companion. The dense
-maps additionally expose `detach` / `detach_by_inner_key` and the matching
-`reattach_sized` / `reattach_by_inner_key`, delegating to `DenseSlotMap`'s
-detach/reattach (the basic map has no such operation). `detach::<T>` re-types the
-pointer on the way out, so detaching a `CastKey<Dog>` from a `Box<dyn Any>` map
-yields a `Box<Dog>`.
+`get_disjoint_mut_by_inner_key`, each with an `unchecked` companion. Every map
+also exposes `detach` / `detach_by_inner_key` and the matching
+`reattach_sized` / `reattach_by_inner_key`, delegating to `slotmap`'s
+detach/reattach (both `SlotMap` and `DenseSlotMap` provide them). `detach::<T>`
+re-types the pointer on the way out, so detaching a `CastKey<Dog>` from a
+`Box<dyn Any>` map yields a `Box<Dog>`.
 
 `MapId` and `RetypePtr` are reimplemented locally, so the only dependencies are
 [`slotmap`](https://crates.io/crates/slotmap) and
@@ -96,10 +102,9 @@ ones.
 | file | contents |
 | --- | --- |
 | `cast_key.rs` | `CastKey<T, K>`, `StableCastKey<T, K>` (generic over `slotmap::Key`) |
-| `unsafe_cast_map.rs` | `UnsafeCastMap` (raw, over `SlotMap`) + iterators |
-| `cast_map.rs` | `CastMap` (safe, `MapId`-checked) + iterators |
-| `unsafe_dense_cast_map.rs` | `UnsafeDenseCastMap` (raw, over `DenseSlotMap`) + iterators |
-| `dense_cast_map.rs` | `DenseCastMap` (safe, `MapId`-checked) + iterators |
+| `backend.rs` | `SlotMapTrait` trait + impls for `SlotMap` and `DenseSlotMap` |
+| `unsafe_cast_map.rs` | generic `UnsafeCastMapG<M>` + iterators; `UnsafeCastMap` / `UnsafeDenseCastMap` aliases |
+| `cast_map.rs` | generic `CastMapG<M>` (safe, `MapId`-checked) + iterators; `CastMap` / `DenseCastMap` aliases |
 | `map_id.rs` | `MapId` |
 | `retype_ptr.rs` | `RetypePtr` (Box / Rc / Arc / &T / &mut T) |
 

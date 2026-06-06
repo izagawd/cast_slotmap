@@ -19,12 +19,18 @@
 //! - [`UnsafeDenseCastMap`] / [`DenseCastMap`] — the same raw/checked pair over
 //!   [`slotmap::DenseSlotMap`], which stores values contiguously for fast
 //!   iteration (see [`UnsafeDenseCastMap`] for the storage trade-offs). The
-//!   cast-key API is identical to the basic maps', plus `detach` / `reattach`
-//!   (which only `DenseSlotMap` supports).
+//!   cast-key API is identical to the basic maps'.
 //!
 //! All four maps support disjoint mutable access via `get_disjoint_mut` (typed,
 //! by [`CastKey`]) and `get_disjoint_mut_by_inner_key` (by backing key), each
 //! with an `unchecked` companion.
+//!
+//! Under the hood there are really just **two** generic types,
+//! [`UnsafeCastMapG`] and [`CastMapG`], each parameterized over a backing
+//! `slotmap` map `M` implementing [`SlotMapTrait`]. The four maps above are type
+//! aliases that pin `M` to `SlotMap` or `DenseSlotMap`. `detach` / `reattach`
+//! are part of [`SlotMapTrait`] — `slotmap` supports them on both maps — so they
+//! exist on all four aliases.
 //!
 //! For the common `Box` case use the aliases [`BoxCastMap`] / [`UnsafeBoxCastMap`]
 //! (and [`BoxDenseCastMap`] / [`UnsafeBoxDenseCastMap`]), typically with
@@ -70,13 +76,12 @@
 #![feature(coerce_unsized)]
 #![feature(unsize)]
 
+pub mod backend;
 pub mod cast_key;
 pub mod cast_map;
-pub mod dense_cast_map;
 pub mod map_id;
 pub mod retype_ptr;
 pub mod unsafe_cast_map;
-pub mod unsafe_dense_cast_map;
 
 // Re-export the slotmap items callers need so they don't have to depend on
 // `slotmap` directly for the common path.
@@ -85,9 +90,9 @@ pub use slotmap::{new_key_type, DefaultKey, Key, KeyData};
 #[doc(inline)]
 pub use cast_key::{CastKey, StableCastKey};
 #[doc(inline)]
-pub use cast_map::{BoxCastMap, CastMap};
+pub use backend::SlotMapTrait;
 #[doc(inline)]
-pub use dense_cast_map::{BoxDenseCastMap, DenseCastMap};
+pub use cast_map::{BoxCastMap, BoxDenseCastMap, CastMap, CastMapG, DenseCastMap};
 #[doc(inline)]
 pub use map_id::MapId;
 #[doc(inline)]
@@ -95,9 +100,9 @@ pub use retype_ptr::RetypePtr;
 #[doc(no_inline)]
 pub use stable_deref_trait::StableDeref;
 #[doc(inline)]
-pub use unsafe_cast_map::{UnsafeBoxCastMap, UnsafeCastMap};
-#[doc(inline)]
-pub use unsafe_dense_cast_map::{UnsafeBoxDenseCastMap, UnsafeDenseCastMap};
+pub use unsafe_cast_map::{
+    UnsafeBoxCastMap, UnsafeBoxDenseCastMap, UnsafeCastMap, UnsafeCastMapG, UnsafeDenseCastMap,
+};
 
 #[cfg(test)]
 mod tests;
