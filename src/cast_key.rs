@@ -123,7 +123,7 @@ where
     /// # Safety
     /// `metadata` must be valid for the value identified by `key`.
     #[inline]
-    pub unsafe fn from_parts(key: K, metadata: <T as Pointee>::Metadata) -> Self {
+    pub unsafe fn from_raw_parts(key: K, metadata: <T as Pointee>::Metadata) -> Self {
         Self { key, metadata }
     }
 }
@@ -198,7 +198,7 @@ where
     /// `map_id` must identify the map that owns the slot addressed by
     /// `cast_key.inner_key()`, and the metadata must be valid for `T`.
     #[inline]
-    pub unsafe fn from_parts(cast_key: CastKey<T, K>, map_id: MapId) -> Self {
+    pub unsafe fn from_raw_parts(cast_key: CastKey<T, K>, map_id: MapId) -> Self {
         StableCastKey {
             inner: cast_key,
             map_id,
