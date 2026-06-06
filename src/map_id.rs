@@ -37,11 +37,11 @@ impl MapId {
     /// the (astronomically unlikely) event of a `usize` overflow.
     #[inline]
     pub fn next() -> Self {
-        // `try_update` returns the *previous* value on success. The counter
+        // `fetch_update` returns the *previous* value on success. The counter
         // starts at 1 and only ever increases, and `checked_add` rules out a
         // wrap to 0, so the returned value is always non-zero.
         let previous = NEXT_MAP_ID
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |raw| raw.checked_add(1))
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |raw| raw.checked_add(1))
             .expect("MapId counter overflow");
 
         MapId(NonZeroUsize::new(previous).expect("MapId counter overflow"))

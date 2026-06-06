@@ -28,9 +28,7 @@
 //! Under the hood there are really just **two** generic types,
 //! [`UnsafeCastMapG`] and [`CastMapG`], each parameterized over a backing
 //! `slotmap` map `M` implementing [`SlotMapTrait`]. The four maps above are type
-//! aliases that pin `M` to `SlotMap` or `DenseSlotMap`. `detach` / `reattach`
-//! are part of [`SlotMapTrait`] — `slotmap` supports them on both maps — so they
-//! exist on all four aliases.
+//! aliases that pin `M` to `SlotMap` or `DenseSlotMap`.
 //!
 //! For the common `Box` case use the aliases [`BoxCastMap`] / [`UnsafeBoxCastMap`]
 //! (and [`BoxDenseCastMap`] / [`UnsafeBoxDenseCastMap`]), typically with

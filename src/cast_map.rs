@@ -6,8 +6,7 @@
 //! stored pointer types are read off `M` as `M::Key` and `M::Value`. The
 //! concrete maps are exposed as aliases: [`CastMap`] (sparse) and
 //! [`DenseCastMap`] (dense), plus the `Box`-storing [`BoxCastMap`] /
-//! [`BoxDenseCastMap`]. `detach` / `reattach` are available on every map, since
-//! `slotmap` supports them on `SlotMap` and `DenseSlotMap` alike.
+//! [`BoxDenseCastMap`].
 //!
 //! Every [`StableCastKey`](crate::cast_key::StableCastKey) carries the map's
 //! identity. Keyed lookups check the id before touching pointer metadata, so a
@@ -204,56 +203,6 @@ where
     #[inline]
     pub fn values(&self) -> impl Iterator<Item = &MTarget<M>> + '_ {
         self.inner.values()
-    }
-}
-
-// ─── Backing-key detach / reattach ────────────────────────
-
-impl<M> CastMapG<M>
-where
-    M: SlotMapTrait,
-    M::Value: StableDeref,
-{
-    /// Detaches an element by its backing `slotmap` key, returning the pointer
-    /// but keeping the slot reservable. Pairs with
-    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key). Backing keys
-    /// bypass the map-id check, like [`remove_by_inner_key`](Self::remove_by_inner_key).
-    #[inline]
-    pub fn detach_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
-        self.inner.detach_by_inner_key(key)
-    }
-
-    /// Reattaches an already-erased `value` at a detached slot, reusing `key`.
-    ///
-    /// # Panics
-    /// Panics if `key` is not detached or the map is full.
-    #[inline]
-    pub fn reattach_by_inner_key(&mut self, key: M::Key, value: M::Value) {
-        self.inner.reattach_by_inner_key(key, value);
-    }
-
-    /// Reattaches a sized smart pointer (e.g. `Box<Dog>`) at a slot freed with
-    /// [`detach`](Self::detach), reusing `key`. Returns `false` and does nothing
-    /// if the key belongs to a different map; otherwise reattaches and returns
-    /// `true`.
-    ///
-    /// # Panics
-    /// Panics if `key` is from this map but not detached, or the map is full.
-    #[inline]
-    pub fn reattach_sized<ConcretePtr>(
-        &mut self,
-        key: StableCastKey<ConcretePtr::Target, M::Key>,
-        value: ConcretePtr,
-    ) -> bool
-    where
-        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
-        ConcretePtr::Target: Sized,
-    {
-        if key.map_id != self.map_id {
-            return false;
-        }
-        self.inner.reattach_sized(key.inner, value);
-        true
     }
 }
 
@@ -533,35 +482,6 @@ where
             inner: self.inner.drain(),
             map_id: self.map_id,
         }
-    }
-}
-
-// ─── Typed detach ──────────────────────────────
-
-impl<M> CastMapG<M>
-where
-    M: SlotMapTrait,
-    M::Value: StableDeref,
-    MTarget<M>: Pointee,
-    <MTarget<M> as Pointee>::Metadata: Copy,
-{
-    /// Detaches an element by its [`StableCastKey`], returning the owned smart
-    /// pointer re-typed to `T` (a `Box<dyn Any>` map hands back a `Box<T>`) and
-    /// keeping the slot reservable. Returns `None` if the key belongs to a
-    /// different map. Pairs with the `reattach` methods.
-    #[inline]
-    pub fn detach<'a, T: ?Sized + Pointee>(
-        &mut self,
-        key: StableCastKey<T, M::Key>,
-    ) -> Option<<M::Value as RetypePtr<'a>>::Retyped<T>>
-    where
-        <T as Pointee>::Metadata: Copy,
-        M::Value: RetypePtr<'a>,
-    {
-        if key.map_id != self.map_id {
-            return None;
-        }
-        unsafe { self.inner.detach(key.inner) }
     }
 }
 
@@ -873,7 +793,7 @@ where
 pub type CastMap<K, Ptr> = CastMapG<SlotMap<K, Ptr>>;
 
 /// Safe castable-key map backed by [`slotmap::DenseSlotMap`] (contiguous
-/// storage, fast iteration; additionally supports `detach` / `reattach`).
+/// storage, fast iteration).
 pub type DenseCastMap<K, Ptr> = CastMapG<DenseSlotMap<K, Ptr>>;
 
 /// Convenience alias: [`CastMap`] storing `Box<T>` (e.g. `dyn Any`).

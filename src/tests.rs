@@ -430,52 +430,6 @@ mod dense {
     }
 
     #[test]
-    fn detach_then_reattach_roundtrip() {
-        let mut map: AnyMap = AnyMap::new();
-        let key: StableCastKey<Dog> = map.insert_sized(Box::new(Dog { name: "Rex".into() }));
-
-        // detach hands back a typed Box<Dog> and frees the slot's value...
-        let mut dog: Box<Dog> = map.detach(key).unwrap();
-        assert_eq!(dog.name, "Rex");
-        assert!(map.get(key).is_none()); // detached: lookups miss
-        assert!(map.is_empty());
-
-        // ...but the same key reattaches a (mutated) value and is valid again.
-        dog.name = "Max".into();
-        assert!(map.reattach_sized(key, dog));
-        assert_eq!(map.get(key).unwrap().name, "Max");
-        assert_eq!(map.len(), 1);
-    }
-
-    #[test]
-    fn detach_reattach_by_inner_key() {
-        let mut map: AnyMap = AnyMap::new();
-        let key: StableCastKey<Cat> = map.insert_sized(Box::new(Cat { lives: 9 }));
-        let ik = key.inner_key();
-
-        let erased: Box<dyn Any> = map.detach_by_inner_key(ik).unwrap();
-        assert_eq!(erased.downcast_ref::<Cat>().unwrap().lives, 9);
-        assert!(map.get(key).is_none());
-
-        map.reattach_by_inner_key(ik, Box::new(Cat { lives: 7 }));
-        assert_eq!(map.get(key).unwrap().lives, 7);
-    }
-
-    #[test]
-    fn reattach_sized_rejects_foreign_key() {
-        let mut a: AnyMap = AnyMap::new();
-        let mut b: AnyMap = AnyMap::new();
-        let ka: StableCastKey<Dog> = a.insert_sized(Box::new(Dog { name: "A".into() }));
-        let _detached: Box<Dog> = a.detach(ka).unwrap();
-
-        // b does not own ka: reattach is a no-op returning false.
-        assert!(!b.reattach_sized(ka, Box::new(Dog { name: "X".into() })));
-        // a owns the detached slot and reattaches successfully.
-        assert!(a.reattach_sized(ka, Box::new(Dog { name: "A2".into() })));
-        assert_eq!(a.get(ka).unwrap().name, "A2");
-    }
-
-    #[test]
     fn get_disjoint_mut_typed() {
         let mut map: BoxDenseCastMap<DefaultKey, u32> = BoxDenseCastMap::new();
         let k1: StableCastKey<u32> = map.insert(Box::new(1u32));
