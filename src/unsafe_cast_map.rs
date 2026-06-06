@@ -631,7 +631,7 @@ where
     }
 }
 
-// ─── detach / reattach (backing-key + sized) ──────────────────────
+// ─── detach / reattach (erased value) ────────────────────────────
 
 impl<M> UnsafeCastMapG<M>
 where
@@ -649,8 +649,8 @@ where
 
     /// Reattaches an already-erased `value` (e.g. a `Box<dyn Any>`) at a slot
     /// previously freed with [`detach_by_inner_key`](Self::detach_by_inner_key),
-    /// reusing `key`. Use the typed [`reattach`](Self::reattach) when
-    /// you hold a concrete pointer like `Box<Dog>` instead.
+    /// reusing `key`. Use [`reattach`](Self::reattach) to pass a [`CastKey`]
+    /// rather than a raw backing key.
     ///
     /// Reattaching a value whose concrete type differs from the original leaves
     /// any [`CastKey`] previously minted for that slot with stale pointer
@@ -667,32 +667,23 @@ where
         self.inner.reattach(key, value);
     }
 
-    /// Reattaches a concrete-typed smart pointer (e.g. `Box<Dog>`) at a slot
-    /// freed with [`detach`](Self::detach), reusing `key`. `value` is coerced to
-    /// the stored erased pointer — the mirror of
-    /// [`insert_sized`](Self::insert_sized).
+    /// Reattaches `value` at a slot freed with [`detach`](Self::detach), reusing
+    /// `key`. `value` is the pointer the backing `slotmap` stores directly
+    /// (`M::Value`, e.g. `Box<dyn Any>`); a concrete pointer like `Box<Dog>`
+    /// unsizes to it implicitly at the call site. Pass whichever [`CastKey`] you
+    /// hold for the slot — only its backing key is used, so `T` is unconstrained.
     ///
-    /// This is the only typed reattach: the target must be `Sized`, so its
-    /// pointer metadata is `()` and `key` stays valid afterwards (and the
-    /// signature ties `key`'s type to `value`'s, so the slot can only come back
-    /// as the same type). There is no unsized counterpart — re-erasing a
-    /// `Box<dyn Trait>` is not a coercion, and would leave the key's vtable
-    /// stale. For an already-erased value use
-    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key).
+    /// Reattaching a value whose concrete type differs from what a retained
+    /// [`CastKey`] expects leaves that key's pointer metadata stale; using it
+    /// with the `unsafe` typed accessors is then undefined behavior — the same
+    /// hazard as [`reattach_by_inner_key`](Self::reattach_by_inner_key), and why
+    /// neither is offered on the checked [`CastMapG`](crate::cast_map::CastMapG).
     ///
     /// # Panics
     /// Panics if `key` is not detached or the map is full.
     #[inline]
-    pub fn reattach<ConcretePtr>(
-        &mut self,
-        key: CastKey<ConcretePtr::Target, M::Key>,
-        value: ConcretePtr,
-    ) where
-        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
-        ConcretePtr::Target: Sized,
-    {
-        let erased: M::Value = value;
-        self.inner.reattach(key.inner_key(), erased);
+    pub fn reattach<T: ?Sized + Pointee>(&mut self, key: CastKey<T, M::Key>, value: M::Value) {
+        self.inner.reattach(key.inner_key(), value);
     }
 }
 
@@ -708,7 +699,7 @@ where
     /// Detaches an element by its [`CastKey`], returning the owned smart pointer
     /// re-typed to `T` (so a `Box<dyn Any>` map hands back a `Box<T>`). Unlike
     /// [`remove`](Self::remove) the slot stays reservable: the same key can be
-    /// reused with [`reattach`](Self::reattach) (sized `T`) or
+    /// reused with [`reattach`](Self::reattach) or
     /// [`reattach_by_inner_key`](Self::reattach_by_inner_key) (erased pointer).
     ///
     /// # Safety
