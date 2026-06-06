@@ -31,7 +31,7 @@ where
     <T as Pointee>::Metadata: Copy,
 {
     pub(crate) key: K,
-    pub(crate) metadata: <T as Pointee>::Metadata,
+    metadata: <T as Pointee>::Metadata,
 }
 
 impl<T: ?Sized + Pointee, K: Key> Clone for CastKey<T, K>
@@ -214,7 +214,7 @@ where
     /// Returns the pointer metadata for `T`.
     #[inline]
     pub fn metadata(&self) -> <T as Pointee>::Metadata {
-        self.inner.metadata
+        self.inner.metadata()
     }
 
     /// Returns the map identity this key is bound to.

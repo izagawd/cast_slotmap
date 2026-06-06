@@ -33,14 +33,14 @@
 
 use std::any::{Any, TypeId};
 use std::collections::TryReserveError;
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::ptr::Pointee;
 
 use slotmap::{DenseSlotMap, Key, SlotMap};
 
-use crate::slotmap_trait::{MTarget, SlotMapTrait};
 use crate::cast_key::CastKey;
 use crate::retype_ptr::RetypePtr;
+use crate::slotmap_trait::{MTarget, SlotMapTrait};
 use stable_deref_trait::StableDeref;
 
 // ─── Conversion helper ───────────────────────────────────────────────────────
@@ -52,7 +52,7 @@ where
     <O as Pointee>::Metadata: Copy,
 {
     let metadata = std::ptr::metadata(reference as *const O);
-    CastKey { key, metadata }
+    unsafe { CastKey::from_raw_parts(key, metadata) }
 }
 
 // ─── UnsafeCastMapG ────────────────────────────────────────────────────────────
@@ -263,10 +263,10 @@ where
         let data_as_any: &dyn Any =
             &*std::ptr::from_raw_parts(base as *const MTarget<M> as *const (), key.metadata());
         if data_as_any.type_id() == TypeId::of::<Concrete>() {
-            Some(CastKey {
-                key: key.key,
-                metadata: (),
-            })
+            Some(CastKey::from_raw_parts(
+                key.key,
+               (),
+            ))
         } else {
             None
         }
