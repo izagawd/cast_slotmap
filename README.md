@@ -96,7 +96,7 @@ ones.
 | file | contents |
 | --- | --- |
 | `cast_key.rs` | `CastKey<T, K>`, `StableCastKey<T, K>` (generic over `slotmap::Key`) |
-| `backend.rs` | `SlotMapTrait` trait + impls for `SlotMap` and `DenseSlotMap` |
+| `slotmap_trait.rs` | `SlotMapTrait` trait + impls for `SlotMap` and `DenseSlotMap` |
 | `unsafe_cast_map.rs` | generic `UnsafeCastMapG<M>` + iterators; `UnsafeCastMap` / `UnsafeDenseCastMap` aliases |
 | `cast_map.rs` | generic `CastMapG<M>` (safe, `MapId`-checked) + iterators; `CastMap` / `DenseCastMap` aliases |
 | `map_id.rs` | `MapId` |

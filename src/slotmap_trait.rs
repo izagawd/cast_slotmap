@@ -1,10 +1,10 @@
-//! The storage backend the cast-map layer delegates to.
+//! The [`SlotMapTrait`] abstraction over the backing `slotmap` map.
 //!
 //! [`SlotMapTrait`] captures the slice of `slotmap`'s API that
 //! [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG) /
 //! [`CastMapG`](crate::cast_map::CastMapG) build on, so the cast logic (the
 //! pointer-metadata reconstruction, the `MapId` checks) is written **once**,
-//! generic over the backend, instead of being duplicated per map kind.
+//! generic over the backing map, instead of being duplicated per map kind.
 //!
 //! Two maps are provided: [`slotmap::SlotMap`] and [`slotmap::DenseSlotMap`];
 //! both implement the whole of [`SlotMapTrait`] (including `detach` / `reattach`,
@@ -30,7 +30,7 @@ pub(crate) type MTarget<M> = <<M as SlotMapTrait>::Value as Deref>::Target;
 ///
 /// Implemented for [`slotmap::SlotMap`] and [`slotmap::DenseSlotMap`]. The
 /// associated iterator types let the cast-map iterators wrap whichever concrete
-/// iterator the backend produces.
+/// iterator the backing map produces.
 pub trait SlotMapTrait: Sized {
     /// The backing `slotmap` key type.
     type Key: Key;
@@ -65,9 +65,9 @@ pub trait SlotMapTrait: Sized {
     /// Owning iterator yielding `(key, value)`.
     type IntoIter: Iterator<Item = (Self::Key, Self::Value)>;
 
-    /// Creates an empty backend (`slotmap`'s `with_key`).
+    /// Creates an empty map (`slotmap`'s `with_key`).
     fn empty() -> Self;
-    /// Creates an empty backend with capacity (`slotmap`'s `with_capacity_and_key`).
+    /// Creates an empty map with capacity (`slotmap`'s `with_capacity_and_key`).
     fn with_capacity(capacity: usize) -> Self;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
@@ -106,7 +106,7 @@ pub trait SlotMapTrait: Sized {
     fn iter(&self) -> Self::Iter<'_>;
     fn iter_mut(&mut self) -> Self::IterMut<'_>;
     fn drain(&mut self) -> Self::Drain<'_>;
-    /// Consumes the backend into its owning `(key, value)` iterator.
+    /// Consumes the map into its owning `(key, value)` iterator.
     fn into_pairs(self) -> Self::IntoIter;
 
     /// Temporarily removes a value, leaving the slot reservable for
