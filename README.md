@@ -10,19 +10,22 @@ correctly typed `&T` with no `downcast_ref` at the call site.
 
 ## The maps
 
+Two axes — **identity** (raw vs. checked) and **storage** (basic vs. dense):
+
 - **`UnsafeCastMap<K, Ptr>`** — the low-level map over `slotmap::SlotMap`.
   Lookups are typed through a `CastKey<T>`, which caches the pointer metadata
   (for a `dyn` type, its vtable) needed to rebuild a `&T` from the erased value.
   The catch: `get` / `get_mut` / `remove` / `downcast_key` are `unsafe` because
-  they **trust that metadata blindly** — they assume the key came from *this*
-  map and that its slot still holds the type the key claims, then rebuild the
-  reference from the cached metadata without verifying either fact. Hand one a
-  key minted by a *different* `UnsafeCastMap`, or a key whose slot has since been
-  reused for another type, and it will reinterpret unrelated bytes as `T`
-  (dispatching through the wrong vtable, reading past the end of the value, and
-  so on) — that's undefined behavior, not a `None`. Reach for it only when you
-  can guarantee yourself that every key is paired with the map and value type it
-  was created for.
+  they **trust that metadata blindly** — they rebuild the `&T` straight from the
+  key's cached metadata without checking it still matches the value actually in
+  that slot. If the slot now holds a *different* type than the key describes, the
+  method reinterprets those bytes as `T` — dispatching through the wrong vtable,
+  reading past the end of the value, and so on. That's undefined behavior, not a
+  `None`. (The lookup itself is fine — `slotmap`'s versioning returns `None` for
+  a stale key; it's the type mismatch that bites. Using a key from a *different*
+  `UnsafeCastMap` is the easy way to trip it: nothing stops its lookup from
+  landing on a live slot that holds some other type.) Reach for it only when you
+  can guarantee the key's type still matches the value in its slot.
 - **`CastMap<K, Ptr>`** — the safe, recommended API over `slotmap::SlotMap`.
   Each map gets a unique `MapId`; every `StableCastKey` carries it, so a key
   from map A used on map B returns `None` instead of being unsound.

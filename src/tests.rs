@@ -284,7 +284,7 @@ fn unsafe_map_typed_roundtrip() {
     // SAFETY: just-inserted key; the stored value really is a `Dog`.
     let key = unsafe { map.downcast_key::<Dog>(dyn_key) }.unwrap();
 
-    // SAFETY: `key` was just minted by this map and still addresses the value.
+    // SAFETY: the slot still holds the `Dog` `key` was made for, so its metadata is valid.
     let d: &Dog = unsafe { map.get(key).unwrap() };
     assert_eq!(d.name, "U");
 
@@ -301,7 +301,7 @@ fn unsafe_map_detach_reattach() {
     // SAFETY: just-inserted key; the stored value really is a `Dog`.
     let key = unsafe { map.downcast_key::<Dog>(dyn_key) }.unwrap();
 
-    // SAFETY: `key` was just minted by this map and still addresses the value.
+    // SAFETY: the slot still holds the `Dog` `key` was made for, so its metadata is valid.
     let mut dog: Box<Dog> = unsafe { map.detach(key).unwrap() };
     assert_eq!(dog.name, "Rex");
     // SAFETY: the slot is detached, so the lookup misses without using metadata.
@@ -499,7 +499,7 @@ mod dense {
         // SAFETY: just-inserted key; the stored value really is a `Dog`.
         let key = unsafe { map.downcast_key::<Dog>(dyn_key) }.unwrap();
 
-        // SAFETY: key was just minted by this map and still addresses the value.
+        // SAFETY: the slot still holds the `Dog` `key` was made for, so its metadata is valid.
         let d: &Dog = unsafe { map.get(key).unwrap() };
         assert_eq!(d.name, "U");
 

@@ -248,7 +248,7 @@ where
     /// but without validity or uniqueness checks.
     ///
     /// # Safety
-    /// Every key must be valid for this map and no two keys may alias one slot.
+    /// Every key must address a live slot, and no two keys may alias one slot.
     #[inline]
     pub unsafe fn get_disjoint_unchecked_mut_by_inner_key<const N: usize>(
         &mut self,
@@ -475,7 +475,7 @@ where
     /// map-id checks.
     ///
     /// # Safety
-    /// - Every key must be valid for this map and no two keys may alias one slot.
+    /// - Every key must address a live slot, and no two keys may alias one slot.
     /// - Each key's pointer metadata must be valid for the data in its slot.
     #[inline]
     pub unsafe fn get_disjoint_unchecked_mut<T: ?Sized + Pointee, const N: usize>(
