@@ -1,22 +1,28 @@
 # cast_slotmap
 
 Castable-key wrappers over the [`slotmap`](https://crates.io/crates/slotmap)
-crate's `SlotMap` and `DenseSlotMap`. This is to `slotmap` what
-`stable_gen_map`'s `StableCastMap` / `UnsafeCastMap` are to its `GenMap`: store
-type-erased heterogeneous values (e.g. `Box<dyn Any>`) and get back **typed**
-keys, so `map.get(key)` returns a correctly typed `&T` with no `downcast_ref` at
-the call site.
+crate's `SlotMap` and `DenseSlotMap`: store type-erased heterogeneous values
+(e.g. `Box<dyn Any>`) and get back **typed** keys, so `map.get(key)` returns a
+correctly typed `&T` with no `downcast_ref` at the call site.
 
 > **Nightly only.** Pointer-metadata reconstruction uses the unstable
 > `ptr_metadata`, `coerce_unsized`, and `unsize` features.
 
 ## The maps
 
-Two axes — **identity** (raw vs. checked) and **storage** (basic vs. dense):
-
-- **`UnsafeCastMap<K, Ptr>`** — raw, over `slotmap::SlotMap`. Typed lookups via
-  `CastKey`, but `get` / `get_mut` / `remove` / `downcast_key` are `unsafe`
-  (no per-map identity check).
+- **`UnsafeCastMap<K, Ptr>`** — the low-level map over `slotmap::SlotMap`.
+  Lookups are typed through a `CastKey<T>`, which caches the pointer metadata
+  (for a `dyn` type, its vtable) needed to rebuild a `&T` from the erased value.
+  The catch: `get` / `get_mut` / `remove` / `downcast_key` are `unsafe` because
+  they **trust that metadata blindly** — they assume the key came from *this*
+  map and that its slot still holds the type the key claims, then rebuild the
+  reference from the cached metadata without verifying either fact. Hand one a
+  key minted by a *different* `UnsafeCastMap`, or a key whose slot has since been
+  reused for another type, and it will reinterpret unrelated bytes as `T`
+  (dispatching through the wrong vtable, reading past the end of the value, and
+  so on) — that's undefined behavior, not a `None`. Reach for it only when you
+  can guarantee yourself that every key is paired with the map and value type it
+  was created for.
 - **`CastMap<K, Ptr>`** — the safe, recommended API over `slotmap::SlotMap`.
   Each map gets a unique `MapId`; every `StableCastKey` carries it, so a key
   from map A used on map B returns `None` instead of being unsound.
@@ -54,9 +60,9 @@ assert_eq!(map.get(dog_key).unwrap().name, "Rex");
 
 ## Design: this is a `SlotMap`, not a stable-reference arena
 
-`slotmap::SlotMap::insert` takes `&mut self` (and so does `DenseSlotMap`). So
-this crate **mirrors slotmap's mutability model**, rather than copying
-`stable_gen_map`'s `&self`-insert API:
+`slotmap::SlotMap::insert` takes `&mut self` (and so does `DenseSlotMap`), so
+this crate **mirrors that mutability model** rather than offering a
+`&self`-insert, stable-reference API:
 
 - Every mutating method — `insert*`, `remove`, `reserve`, `clear`, `retain`,
   `drain` — takes `&mut self`.
@@ -70,10 +76,10 @@ this crate **mirrors slotmap's mutability model**, rather than copying
     reaching past its public API. `clear` is the native way to invalidate every
     outstanding key.
 
-## What carries over from the cast-map design
+## Key-level API
 
-The *key*-level machinery is unchanged, because it is about keys, not about how
-the underlying map mutates: `insert` / `insert_with_key` / `try_insert_with_key`,
+The key-level API is independent of how the underlying map mutates: `insert` /
+`insert_with_key` / `try_insert_with_key`,
 `downcast_key`, `CastKey::upcast`, typed `get<T>` /
 `get_unchecked<T>` / `remove<T>` (via `RetypePtr`), `cast_key_of`,
 `get_by_inner_key`(`_mut`), `remove_by_inner_key`, `keys`,
@@ -89,19 +95,6 @@ All four maps also offer disjoint mutable access — `get_disjoint_mut` (typed) 
 supplies the `StableDeref` bound (the same trait `elsa`, `owning_ref`, etc. use),
 so any `StableDeref` smart pointer works as the stored `Ptr`, not just the std
 ones.
-
-## Layout
-
-| file | contents |
-| --- | --- |
-| `cast_key.rs` | `CastKey<T, K>`, `StableCastKey<T, K>` (generic over `slotmap::Key`) |
-| `slotmap_trait.rs` | `SlotMapTrait` trait + impls for `SlotMap` and `DenseSlotMap` |
-| `unsafe_cast_map.rs` | generic `UnsafeCastMapG<M>` + iterators; `UnsafeCastMap` / `UnsafeDenseCastMap` aliases |
-| `cast_map.rs` | generic `CastMapG<M>` (safe, `MapId`-checked) + iterators; `CastMap` / `DenseCastMap` aliases |
-| `map_id.rs` | `MapId` |
-| `retype_ptr.rs` | `RetypePtr` (Box / Rc / Arc / &T / &mut T) |
-
-The `StableDeref` bound comes from the `stable_deref_trait` crate.
 
 ## License
 

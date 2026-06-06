@@ -10,7 +10,7 @@
 //! [`inner_key`](CastKey::inner_key).
 //!
 //! Because `slotmap`'s keys are `Copy`, a `CastKey` simply holds the key by
-//! value (unlike `stable_gen_map`, which stores raw `KeyData`).
+//! value.
 
 use std::ptr::Pointee;
 

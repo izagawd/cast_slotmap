@@ -96,6 +96,7 @@ where
     M: SlotMapTrait,
     M::Value: StableDeref,
 {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }
@@ -612,6 +613,7 @@ where
 
 // ─── Iter (shared) ───────────────────────────────────────────────────────────
 
+/// Shared iterator over `(CastKey, &Target)` pairs.
 pub struct Iter<'a, M>
 where
     M: SlotMapTrait + 'a,
@@ -644,6 +646,7 @@ where
 
 // ─── IterMut ─────────────────────────────────────────────────────────────────
 
+/// Mutable iterator over `(CastKey, &mut Target)` pairs.
 pub struct IterMut<'a, M>
 where
     M: SlotMapTrait + 'a,
@@ -676,6 +679,7 @@ where
 
 // ─── Drain ───────────────────────────────────────────────────────────────────
 
+/// Draining iterator over `(CastKey, value)`, emptying the map.
 pub struct Drain<'a, M>
 where
     M: SlotMapTrait + 'a,
@@ -708,6 +712,7 @@ where
 
 // ─── IntoIter (owning) ───────────────────────────────────────────────────────
 
+/// Owning iterator over `(CastKey, value)` pairs.
 pub struct IntoIter<M>
 where
     M: SlotMapTrait,

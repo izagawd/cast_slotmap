@@ -1,6 +1,6 @@
 //! Tests for the cast slot maps. These exercise the public surface and the
-//! `MapId` / version-based soundness checks. They mirror `stable_gen_map`'s
-//! castable tests, adapted to `slotmap`'s `&mut self` mutation model.
+//! `MapId` / version-based soundness checks specific to this crate, on top of
+//! `slotmap`'s `&mut self` mutation model.
 
 use std::any::Any;
 
@@ -356,6 +356,45 @@ fn get_disjoint_mut_basic() {
     let [c] = map.get_disjoint_mut_by_inner_key([k2.inner_key()]).unwrap();
     *c += 100;
     assert_eq!(*map.get(k2).unwrap(), 122);
+}
+
+// ─── unsized non-`dyn` target: slice length metadata round-trips ─────────────
+
+#[test]
+fn slice_target_metadata_roundtrip() {
+    // The key carries slice *length* metadata (a `usize`), not a vtable — the
+    // one `Pointee::Metadata` kind the `dyn Any` and sized tests don't exercise.
+    let mut map: BoxCastMap<DefaultKey, [u32]> = BoxCastMap::new();
+    let key: StableCastKey<[u32]> = map.insert(vec![1u32, 2, 3].into_boxed_slice());
+    assert_eq!(map.get(key).unwrap(), &[1, 2, 3]);
+
+    map.get_mut(key).unwrap()[0] = 9;
+    assert_eq!(map.get(key).unwrap(), &[9, 2, 3]);
+}
+
+// ─── owning IntoIterator yields the cast keys + values ───────────────────────
+
+#[test]
+fn owned_into_iterator_yields_all() {
+    let mut map: AnyMap = AnyMap::new();
+    map.insert(Box::new(Cat { lives: 1 }));
+    map.insert(Box::new(Cat { lives: 2 }));
+
+    let sum: u32 = map
+        .into_iter()
+        .filter_map(|(_k, v)| v.downcast_ref::<Cat>().map(|c| c.lives))
+        .sum();
+    assert_eq!(sum, 3);
+}
+
+// ─── IndexMut mutates in place ───────────────────────────────────────────────
+
+#[test]
+fn index_mut_mutates() {
+    let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
+    let key: StableCastKey<u32> = map.insert(Box::new(5u32));
+    map[key] += 10;
+    assert_eq!(map[key], 15);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

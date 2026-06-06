@@ -1,11 +1,9 @@
 //! Castable-key wrappers over the [`slotmap`] crate's
 //! [`SlotMap`](slotmap::SlotMap) and [`DenseSlotMap`](slotmap::DenseSlotMap).
 //!
-//! This crate is to `slotmap::SlotMap` what `stable_gen_map`'s `StableCastMap`
-//! / `UnsafeCastMap` are to its `GenMap`: it stores type-erased heterogeneous
-//! values (e.g. `Box<dyn Any>`) and hands back typed [`CastKey`]s, so
-//! `map.get(key)` returns a correctly typed `&T` with no `downcast_ref` at the
-//! call site.
+//! Store type-erased heterogeneous values (e.g. `Box<dyn Any>`) and hand back
+//! typed [`CastKey`]s, so `map.get(key)` returns a correctly typed `&T` with no
+//! `downcast_ref` at the call site.
 //!
 //! Two axes, four maps. The **identity** axis is raw vs. checked; the
 //! **storage** axis is basic vs. dense:
@@ -34,7 +32,7 @@
 //! (and [`BoxDenseCastMap`] / [`UnsafeBoxDenseCastMap`]), typically with
 //! `dyn Any`: `BoxCastMap<DefaultKey, dyn Any>`.
 //!
-//! # Differences from a `stable_gen_map` cast map
+//! # A `SlotMap`, not a stable-reference arena
 //! `slotmap::SlotMap::insert` takes `&mut self` (it is not a stable-reference,
 //! interior-mutability arena; `DenseSlotMap` is the same), so every mutating
 //! method here — `insert*`, `remove`, `reserve`, `clear`, `retain`, `drain` —
