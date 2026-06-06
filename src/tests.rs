@@ -301,10 +301,12 @@ fn unsafe_map_detach_reattach() {
     assert!(unsafe { map.get(key) }.is_none());
     assert!(map.is_empty());
 
-    // Reattach a (mutated) sized value of the SAME type — `key` stays valid.
+    // Reattach the (mutated) value. `reattach` takes the map's erased-target
+    // key, so upcast the typed `CastKey<Dog>` to `CastKey<dyn Any>`; the
+    // `Box<Dog>` value unsizes to `Box<dyn Any>` at the call site.
     dog.name = "Max".into();
-    map.reattach(key, dog);
-    // SAFETY: same type reattached, so `key`'s metadata is still correct.
+    map.reattach(key.upcast::<dyn Any>(), dog);
+    // SAFETY: a `Dog` is back in the slot, so `key`'s metadata is still correct.
     assert_eq!(unsafe { map.get(key) }.unwrap().name, "Max");
     assert_eq!(map.len(), 1);
 

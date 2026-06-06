@@ -631,7 +631,7 @@ where
     }
 }
 
-// ─── detach / reattach (erased value) ────────────────────────────
+// ─── detach / reattach (backing key) ────────────────────────────
 
 impl<M> UnsafeCastMapG<M>
 where
@@ -666,28 +666,9 @@ where
     pub fn reattach_by_inner_key(&mut self, key: M::Key, value: M::Value) {
         self.inner.reattach(key, value);
     }
-
-    /// Reattaches `value` at a slot freed with [`detach`](Self::detach), reusing
-    /// `key`. `value` is the pointer the backing `slotmap` stores directly
-    /// (`M::Value`, e.g. `Box<dyn Any>`); a concrete pointer like `Box<Dog>`
-    /// unsizes to it implicitly at the call site. Pass whichever [`CastKey`] you
-    /// hold for the slot — only its backing key is used, so `T` is unconstrained.
-    ///
-    /// Reattaching a value whose concrete type differs from what a retained
-    /// [`CastKey`] expects leaves that key's pointer metadata stale; using it
-    /// with the `unsafe` typed accessors is then undefined behavior — the same
-    /// hazard as [`reattach_by_inner_key`](Self::reattach_by_inner_key), and why
-    /// neither is offered on the checked [`CastMapG`](crate::cast_map::CastMapG).
-    ///
-    /// # Panics
-    /// Panics if `key` is not detached or the map is full.
-    #[inline]
-    pub fn reattach<T: ?Sized + Pointee>(&mut self, key: CastKey<T, M::Key>, value: M::Value) {
-        self.inner.reattach(key.inner_key(), value);
-    }
 }
 
-// ─── typed detach (requires pointer metadata) ─────────────────────
+// ─── detach / reattach (cast key) ────────────────────────────────
 
 impl<M> UnsafeCastMapG<M>
 where
@@ -715,6 +696,29 @@ where
     {
         let stored = self.inner.detach(key.inner_key())?;
         Some(stored.retype::<T>(key.metadata()))
+    }
+
+    /// Reattaches `value` at a slot freed with [`detach`](Self::detach), reusing
+    /// `key`. `value` is the pointer the backing `slotmap` stores directly
+    /// (`M::Value`, e.g. `Box<dyn Any>`); a concrete pointer like `Box<Dog>`
+    /// unsizes to it implicitly at the call site. `key` is the erased-target
+    /// [`CastKey`] the map itself issues — `CastKey<MTarget<M>, M::Key>`, as
+    /// returned by [`insert`](Self::insert), [`keys`](Self::keys), or
+    /// [`cast_key_of`](Self::cast_key_of); a concrete-typed key from
+    /// [`insert_sized`](Self::insert_sized) reaches it via
+    /// [`CastKey::upcast`](crate::cast_key::CastKey::upcast).
+    ///
+    /// Reattaching a value of a different concrete type than the slot last held
+    /// leaves any retained [`CastKey`] with stale metadata; using such a key with
+    /// the `unsafe` typed accessors is then undefined behavior — the same hazard
+    /// as [`reattach_by_inner_key`](Self::reattach_by_inner_key), and why neither
+    /// is offered on the checked [`CastMapG`](crate::cast_map::CastMapG).
+    ///
+    /// # Panics
+    /// Panics if `key` is not detached or the map is full.
+    #[inline]
+    pub fn reattach(&mut self, key: CastKey<MTarget<M>, M::Key>, value: M::Value) {
+        self.inner.reattach(key.inner_key(), value);
     }
 }
 
