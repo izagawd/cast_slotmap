@@ -304,118 +304,6 @@ where
         Ok(to_castable::<M::Key, MTarget<M>>(inner_key, &**reference))
     }
 
-    // ── insert_sized ─────────────────────────────────────────────────────
-
-    /// Inserts a concrete-typed smart pointer, returning a [`CastKey`] whose
-    /// metadata is for `ConcretePtr::Target` (not the erased output).
-    #[inline]
-    pub fn insert_sized<ConcretePtr>(
-        &mut self,
-        value: ConcretePtr,
-    ) -> CastKey<ConcretePtr::Target, M::Key>
-    where
-        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
-        ConcretePtr::Target: Sized,
-    {
-        self.insert_sized_with_key(|_| value)
-    }
-
-    /// Inserts a concrete smart pointer produced by `func`, which receives the
-    /// fully-typed [`CastKey`].
-    #[inline]
-    pub fn insert_sized_with_key<ConcretePtr>(
-        &mut self,
-        func: impl FnOnce(CastKey<ConcretePtr::Target, M::Key>) -> ConcretePtr,
-    ) -> CastKey<ConcretePtr::Target, M::Key>
-    where
-        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
-        ConcretePtr::Target: Sized,
-    {
-        self.try_insert_sized_with_key(|key| Ok::<_, ()>(func(key)))
-            .unwrap()
-    }
-
-    /// Like [`insert_sized_with_key`](Self::insert_sized_with_key) but the
-    /// closure may return `Err`.
-    #[inline]
-    pub fn try_insert_sized_with_key<ConcretePtr, E>(
-        &mut self,
-        func: impl FnOnce(CastKey<ConcretePtr::Target, M::Key>) -> Result<ConcretePtr, E>,
-    ) -> Result<CastKey<ConcretePtr::Target, M::Key>, E>
-    where
-        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
-        ConcretePtr::Target: Sized,
-    {
-        let mut saved_key: Option<CastKey<ConcretePtr::Target, M::Key>> = None;
-
-        self.inner.try_insert_with_key(|k| -> Result<M::Value, E> {
-            // `ConcretePtr::Target: Sized` => its pointer metadata is `()`.
-            let typed_key = CastKey {
-                key: k,
-                metadata: (),
-            };
-            saved_key = Some(typed_key);
-            let concrete: ConcretePtr = func(typed_key)?;
-            Ok(concrete)
-        })?;
-
-        Ok(saved_key.unwrap())
-    }
-
-    // ── insert_as ──────────────────────────────────────────────────────────
-
-    /// Inserts a smart pointer whose target type differs from the map's output,
-    /// returning a key typed with the *source* type.
-    #[inline]
-    pub fn insert_as<SourcePtr>(&mut self, value: SourcePtr) -> CastKey<SourcePtr::Target, M::Key>
-    where
-        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
-        SourcePtr::Target: Pointee<Metadata: Copy>,
-    {
-        self.insert_as_with_key(|_| value)
-    }
-
-    /// Inserts a smart pointer produced by `func`, returning a key typed with
-    /// the source `SourcePtr::Target`.
-    #[inline]
-    pub fn insert_as_with_key<SourcePtr>(
-        &mut self,
-        func: impl FnOnce(M::Key) -> SourcePtr,
-    ) -> CastKey<SourcePtr::Target, M::Key>
-    where
-        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
-        SourcePtr::Target: Pointee<Metadata: Copy>,
-    {
-        self.try_insert_as_with_key(|key| Ok::<_, ()>(func(key)))
-            .unwrap()
-    }
-
-    /// Like [`insert_as_with_key`](Self::insert_as_with_key) but the closure may
-    /// return `Err`.
-    #[inline]
-    pub fn try_insert_as_with_key<SourcePtr, E>(
-        &mut self,
-        func: impl FnOnce(M::Key) -> Result<SourcePtr, E>,
-    ) -> Result<CastKey<SourcePtr::Target, M::Key>, E>
-    where
-        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
-        SourcePtr::Target: Pointee<Metadata: Copy>,
-    {
-        let mut saved_metadata: Option<<SourcePtr::Target as Pointee>::Metadata> = None;
-
-        let inner_key = self.inner.try_insert_with_key(|k| -> Result<M::Value, E> {
-            let concrete: SourcePtr = func(k)?;
-            saved_metadata = Some(std::ptr::metadata(&*concrete as *const SourcePtr::Target));
-            Ok(concrete)
-        })?;
-
-        let metadata = saved_metadata.unwrap();
-        Ok(CastKey {
-            key: inner_key,
-            metadata,
-        })
-    }
-
     // ── cast_key_of ──────────────────────────────────────────────────────
 
     /// Converts a backing `slotmap` key into a full [`CastKey`] by reading the
@@ -704,8 +592,8 @@ where
     /// unsizes to it implicitly at the call site. `key` is the erased-target
     /// [`CastKey`] the map itself issues — `CastKey<MTarget<M>, M::Key>`, as
     /// returned by [`insert`](Self::insert), [`keys`](Self::keys), or
-    /// [`cast_key_of`](Self::cast_key_of); a concrete-typed key from
-    /// [`insert_sized`](Self::insert_sized) reaches it via
+    /// [`cast_key_of`](Self::cast_key_of); a concrete-typed key (e.g. from
+    /// [`downcast_key`](Self::downcast_key)) reaches it via
     /// [`CastKey::upcast`](crate::cast_key::CastKey::upcast).
     ///
     /// Reattaching a value of a different concrete type than the slot last held

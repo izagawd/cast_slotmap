@@ -43,14 +43,13 @@ struct Dog { name: String }
 
 let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
 
-// Insert a concrete type into a `dyn Any` map; get a `Dog`-typed key back.
-let dog_key: StableCastKey<Dog> = map.insert_sized(Box::new(Dog { name: "Rex".into() }));
+// Insert a concrete type into a `dyn Any` map; the key comes back erased.
+let dyn_key: StableCastKey<dyn Any> = map.insert(Box::new(Dog { name: "Rex".into() }));
 
-// Upcast to the erased form, then recover the concrete key.
-let dyn_key: StableCastKey<dyn Any> = dog_key.upcast::<dyn Any>();
-let recovered: StableCastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
+// Downcast the erased key to a concrete `Dog`-typed key.
+let dog_key: StableCastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
 
-assert_eq!(map.get(recovered).unwrap().name, "Rex");
+assert_eq!(map.get(dog_key).unwrap().name, "Rex");
 ```
 
 ## Design: this is a `SlotMap`, not a stable-reference arena
@@ -74,8 +73,8 @@ this crate **mirrors slotmap's mutability model**, rather than copying
 ## What carries over from the cast-map design
 
 The *key*-level machinery is unchanged, because it is about keys, not about how
-the underlying map mutates: `insert_sized` / `insert_as` (+ `_with_key` /
-`try_` variants), `downcast_key`, `CastKey::upcast`, typed `get<T>` /
+the underlying map mutates: `insert` / `insert_with_key` / `try_insert_with_key`,
+`downcast_key`, `CastKey::upcast`, typed `get<T>` /
 `get_unchecked<T>` / `remove<T>` (via `RetypePtr`), `cast_key_of`,
 `get_by_inner_key`(`_mut`), `remove_by_inner_key`, `keys`,
 `values`(`_mut`), `iter`(`_mut`), `drain`, `retain`, `Index`/`IndexMut`, and

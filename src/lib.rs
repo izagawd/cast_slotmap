@@ -61,14 +61,13 @@
 //!
 //! let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
 //!
-//! // Insert a concrete type into a `dyn Any` map; get a `Dog`-typed key back.
-//! let dog_key: StableCastKey<Dog> = map.insert_sized(Box::new(Dog { name: "Rex".into() }));
+//! // Insert a concrete type into a `dyn Any` map; the key comes back erased.
+//! let dyn_key: StableCastKey<dyn Any> = map.insert(Box::new(Dog { name: "Rex".into() }));
 //!
-//! // Upcast the key to its erased form, then downcast it back.
-//! let dyn_key: StableCastKey<dyn Any> = dog_key.upcast::<dyn Any>();
-//! let recovered: StableCastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
+//! // Downcast the erased key to a concrete `Dog`-typed key.
+//! let dog_key: StableCastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
 //!
-//! assert_eq!(map.get(recovered).unwrap().name, "Rex");
+//! assert_eq!(map.get(dog_key).unwrap().name, "Rex");
 //! ```
 #![feature(ptr_metadata)]
 #![feature(coerce_unsized)]
