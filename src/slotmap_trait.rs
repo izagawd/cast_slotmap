@@ -7,9 +7,10 @@
 //! generic over the backend, instead of being duplicated per map kind.
 //!
 //! Two maps are provided: [`slotmap::SlotMap`] and [`slotmap::DenseSlotMap`];
-//! both implement the whole of [`SlotMapTrait`], so a single trait covers them
-//! with no sub-trait. A further map such as `slotmap::HopSlotMap` can be added
-//! by implementing the trait for it.
+//! both implement the whole of [`SlotMapTrait`] (including `detach` / `reattach`,
+//! which `slotmap` offers on both), so a single trait covers them with no
+//! sub-trait. A map lacking `detach` / `reattach` — such as `slotmap::HopSlotMap`
+//! — would need those split into an optional sub-trait before it could be added.
 //!
 //! The method names here intentionally differ from `slotmap`'s where they would
 //! otherwise collide with an inherent method during delegation (`empty` /
@@ -107,6 +108,17 @@ pub trait SlotMapTrait: Sized {
     fn drain(&mut self) -> Self::Drain<'_>;
     /// Consumes the backend into its owning `(key, value)` iterator.
     fn into_pairs(self) -> Self::IntoIter;
+
+    /// Temporarily removes a value, leaving the slot reservable for
+    /// [`reattach`](Self::reattach). Both [`slotmap::SlotMap`] and
+    /// [`slotmap::DenseSlotMap`] support this.
+    fn detach(&mut self, key: Self::Key) -> Option<Self::Value>;
+    /// Reattaches a value at a detached slot, reusing `detached_key`.
+    ///
+    /// # Panics
+    /// Panics if `detached_key` is not currently in a detached state (and, for
+    /// dense storage, if the map is full).
+    fn reattach(&mut self, detached_key: Self::Key, value: Self::Value);
 }
 
 // ─── SlotMap ─────────────────────────────────────────────────────────────────
@@ -239,6 +251,14 @@ impl<K: Key, V> SlotMapTrait for SlotMap<K, V> {
     fn into_pairs(self) -> Self::IntoIter {
         self.into_iter()
     }
+    #[inline]
+    fn detach(&mut self, key: K) -> Option<V> {
+        self.detach(key)
+    }
+    #[inline]
+    fn reattach(&mut self, detached_key: K, value: V) {
+        self.reattach(detached_key, value);
+    }
 }
 
 // ─── DenseSlotMap ──────────────────────────────────────────────────────────────
@@ -370,5 +390,13 @@ impl<K: Key, V> SlotMapTrait for DenseSlotMap<K, V> {
     #[inline]
     fn into_pairs(self) -> Self::IntoIter {
         self.into_iter()
+    }
+    #[inline]
+    fn detach(&mut self, key: K) -> Option<V> {
+        self.detach(key)
+    }
+    #[inline]
+    fn reattach(&mut self, detached_key: K, value: V) {
+        self.reattach(detached_key, value);
     }
 }

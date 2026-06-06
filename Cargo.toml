@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Castable-key wrappers over the slotmap crate's SlotMap: type-erased heterogeneous storage (e.g. Box<dyn Any>) with typed CastKeys and per-map identity. Nightly only."
-keywords = ["slotmap", "cast", "downcast", "any", "arena"]
+keywords = ["slotmap", "cast", "downcast", "allocator", "arena"]
 categories = ["data-structures", "memory-management"]
+rust-version = "1.79.0"
+readme = "README.md"
 
 [dependencies]
 slotmap = "1.1"

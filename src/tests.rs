@@ -289,6 +289,34 @@ fn unsafe_map_typed_roundtrip() {
     assert!(map.is_empty());
 }
 
+#[test]
+fn unsafe_map_detach_reattach() {
+    let mut map: UnsafeBoxCastMap<DefaultKey, dyn Any> = UnsafeBoxCastMap::new();
+    let key = map.insert_sized(Box::new(Dog { name: "Rex".into() }));
+
+    // SAFETY: `key` was just minted by this map and still addresses the value.
+    let mut dog: Box<Dog> = unsafe { map.detach(key).unwrap() };
+    assert_eq!(dog.name, "Rex");
+    // SAFETY: the slot is detached, so the lookup misses without using metadata.
+    assert!(unsafe { map.get(key) }.is_none());
+    assert!(map.is_empty());
+
+    // Reattach a (mutated) sized value of the SAME type — `key` stays valid.
+    dog.name = "Max".into();
+    map.reattach(key, dog);
+    // SAFETY: same type reattached, so `key`'s metadata is still correct.
+    assert_eq!(unsafe { map.get(key) }.unwrap().name, "Max");
+    assert_eq!(map.len(), 1);
+
+    // Backing-key detach/reattach with an already-erased pointer.
+    let ik = key.inner_key();
+    let erased: Box<dyn Any> = map.detach_by_inner_key(ik).unwrap();
+    assert_eq!(erased.downcast_ref::<Dog>().unwrap().name, "Max");
+    map.reattach_by_inner_key(ik, Box::new(Dog { name: "Zed".into() }) as Box<dyn Any>);
+    // SAFETY: still a `Dog`, so `key`'s metadata remains valid.
+    assert_eq!(unsafe { map.get(key) }.unwrap().name, "Zed");
+}
+
 // ─── try_insert_with_key error path leaves the map untouched ─────────────────
 
 #[test]

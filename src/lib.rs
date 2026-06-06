@@ -74,7 +74,7 @@
 #![feature(coerce_unsized)]
 #![feature(unsize)]
 
-pub mod backend;
+pub mod slotmap_trait;
 pub mod cast_key;
 pub mod cast_map;
 pub mod map_id;
@@ -88,7 +88,7 @@ pub use slotmap::{new_key_type, DefaultKey, Key, KeyData};
 #[doc(inline)]
 pub use cast_key::{CastKey, StableCastKey};
 #[doc(inline)]
-pub use backend::SlotMapTrait;
+pub use slotmap_trait::SlotMapTrait;
 #[doc(inline)]
 pub use cast_map::{BoxCastMap, BoxDenseCastMap, CastMap, CastMapG, DenseCastMap};
 #[doc(inline)]

@@ -8,6 +8,12 @@
 //! [`DenseCastMap`] (dense), plus the `Box`-storing [`BoxCastMap`] /
 //! [`BoxDenseCastMap`].
 //!
+//! `detach` / `reattach` are deliberately **not** offered here: reattaching a
+//! value of a different type would invalidate a key's cached pointer metadata,
+//! which the [`MapId`] check cannot catch. They live on the unsafe
+//! [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG), reachable via
+//! [`inner_mut`](CastMapG::inner_mut) if you accept that `unsafe` contract.
+//!
 //! Every [`StableCastKey`](crate::cast_key::StableCastKey) carries the map's
 //! identity. Keyed lookups check the id before touching pointer metadata, so a
 //! key from one map used on a different one returns `None` instead of being unsound.
@@ -22,7 +28,7 @@ use std::ptr::Pointee;
 
 use slotmap::{DenseSlotMap, Key, SlotMap};
 
-use crate::backend::{MTarget, SlotMapTrait};
+use crate::slotmap_trait::{MTarget, SlotMapTrait};
 use crate::cast_key::{CastKey, StableCastKey};
 use crate::map_id::MapId;
 use crate::retype_ptr::RetypePtr;

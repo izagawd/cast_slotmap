@@ -4,7 +4,7 @@
 //! [`UnsafeCastMapG`] is the single source of truth for the cast logic — the
 //! pointer-metadata reconstruction behind the typed `get` / `get_mut` /
 //! `remove` family. Its one type parameter is the backing map `M`
-//! ([`SlotMapTrait`](crate::backend::SlotMapTrait)); the backing key and stored
+//! ([`SlotMapTrait`](crate::slotmap_trait::SlotMapTrait)); the backing key and stored
 //! pointer types are read off `M` as `M::Key` and `M::Value`. The same code
 //! serves both [`slotmap::SlotMap`] and [`slotmap::DenseSlotMap`], exposed as the
 //! [`UnsafeCastMap`] and [`UnsafeDenseCastMap`] type aliases.
@@ -17,9 +17,14 @@
 //!
 //! ## Relationship to `slotmap`
 //! Every method forwards to the backing `slotmap` map through the
-//! [`SlotMapTrait`](crate::backend::SlotMapTrait) trait. Mutating methods
+//! [`SlotMapTrait`](crate::slotmap_trait::SlotMapTrait) trait. Mutating methods
 //! (`insert*`, `remove`, `reserve`, `clear`, `retain`, `drain`) take `&mut self`
-//! because that is `slotmap`'s signature. There is intentionally **no** `get_slot`,
+//! because that is `slotmap`'s signature. `detach` / `reattach` are exposed here
+//! (both `slotmap` maps support them) but **not** on the checked
+//! [`CastMapG`](crate::cast_map::CastMapG): reattaching a different concrete type
+//! under an existing key would leave that key's cached pointer metadata stale,
+//! so it is left to the caller's `unsafe` discipline for now. There is
+//! intentionally **no** `get_slot`,
 //! `get_by_index_only`, `reset`, or `unsafe_clone` / `clone_mut` family:
 //! `slotmap` exposes none of those. `iter` is a plain safe shared iterator
 //! because `slotmap`'s `get` borrows `&self` while `insert` borrows `&mut self`,
@@ -32,7 +37,7 @@ use std::ptr::Pointee;
 
 use slotmap::{DenseSlotMap, Key, SlotMap};
 
-use crate::backend::{MTarget, SlotMapTrait};
+use crate::slotmap_trait::{MTarget, SlotMapTrait};
 use crate::cast_key::CastKey;
 use crate::retype_ptr::RetypePtr;
 use stable_deref_trait::StableDeref;
@@ -623,6 +628,102 @@ where
             let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
             unsafe { &mut *std::ptr::from_raw_parts_mut(data_ptr, meta) }
         })
+    }
+}
+
+// ─── detach / reattach (backing-key + sized) ──────────────────────
+
+impl<M> UnsafeCastMapG<M>
+where
+    M: SlotMapTrait,
+    M::Value: StableDeref,
+{
+    /// Detaches an element by its backing `slotmap` key, returning the stored
+    /// pointer but keeping the slot reservable so the key can be reused with
+    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key). Forwards to
+    /// `slotmap`'s `detach`, which both `SlotMap` and `DenseSlotMap` provide.
+    #[inline]
+    pub fn detach_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
+        self.inner.detach(key)
+    }
+
+    /// Reattaches an already-erased `value` (e.g. a `Box<dyn Any>`) at a slot
+    /// previously freed with [`detach_by_inner_key`](Self::detach_by_inner_key),
+    /// reusing `key`. Use the typed [`reattach`](Self::reattach) when
+    /// you hold a concrete pointer like `Box<Dog>` instead.
+    ///
+    /// Reattaching a value whose concrete type differs from the original leaves
+    /// any [`CastKey`] previously minted for that slot with stale pointer
+    /// metadata; using such a key with the `unsafe` typed accessors is then
+    /// undefined behavior. This hazard is why `reattach` lives only on the
+    /// unsafe map and not (yet) on the checked
+    /// [`CastMapG`](crate::cast_map::CastMapG).
+    ///
+    /// # Panics
+    /// Panics if `key` is not in a detached state, or if the map is full
+    /// (mirrors `slotmap`'s `reattach`).
+    #[inline]
+    pub fn reattach_by_inner_key(&mut self, key: M::Key, value: M::Value) {
+        self.inner.reattach(key, value);
+    }
+
+    /// Reattaches a concrete-typed smart pointer (e.g. `Box<Dog>`) at a slot
+    /// freed with [`detach`](Self::detach), reusing `key`. `value` is coerced to
+    /// the stored erased pointer — the mirror of
+    /// [`insert_sized`](Self::insert_sized).
+    ///
+    /// This is the only typed reattach: the target must be `Sized`, so its
+    /// pointer metadata is `()` and `key` stays valid afterwards (and the
+    /// signature ties `key`'s type to `value`'s, so the slot can only come back
+    /// as the same type). There is no unsized counterpart — re-erasing a
+    /// `Box<dyn Trait>` is not a coercion, and would leave the key's vtable
+    /// stale. For an already-erased value use
+    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key).
+    ///
+    /// # Panics
+    /// Panics if `key` is not detached or the map is full.
+    #[inline]
+    pub fn reattach<ConcretePtr>(
+        &mut self,
+        key: CastKey<ConcretePtr::Target, M::Key>,
+        value: ConcretePtr,
+    ) where
+        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        ConcretePtr::Target: Sized,
+    {
+        let erased: M::Value = value;
+        self.inner.reattach(key.inner_key(), erased);
+    }
+}
+
+// ─── typed detach (requires pointer metadata) ─────────────────────
+
+impl<M> UnsafeCastMapG<M>
+where
+    M: SlotMapTrait,
+    M::Value: StableDeref,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
+{
+    /// Detaches an element by its [`CastKey`], returning the owned smart pointer
+    /// re-typed to `T` (so a `Box<dyn Any>` map hands back a `Box<T>`). Unlike
+    /// [`remove`](Self::remove) the slot stays reservable: the same key can be
+    /// reused with [`reattach`](Self::reattach) (sized `T`) or
+    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key) (erased pointer).
+    ///
+    /// # Safety
+    /// The key's pointer metadata must be valid for the data stored at that slot.
+    #[inline]
+    pub unsafe fn detach<'a, T: ?Sized + Pointee>(
+        &mut self,
+        key: CastKey<T, M::Key>,
+    ) -> Option<<M::Value as RetypePtr<'a>>::Retyped<T>>
+    where
+        <T as Pointee>::Metadata: Copy,
+        M::Value: RetypePtr<'a>,
+    {
+        let stored = self.inner.detach(key.inner_key())?;
+        Some(stored.retype::<T>(key.metadata()))
     }
 }
 
