@@ -327,6 +327,49 @@ where
         self.inner.try_insert_sized_with_key(func)
     }
 
+    // ── insert_as ────────────────────────────────────────────────────────
+
+    /// Inserts a smart pointer whose (possibly unsized) target differs from
+    /// the map's output type, returning a key typed with the *source* type.
+    #[inline]
+    pub fn insert_as<SourcePtr>(
+        &mut self,
+        value: SourcePtr,
+    ) -> CastKey<SourcePtr::Target, M::Key>
+    where
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr::Target: Pointee<Metadata: Copy>,
+    {
+        self.inner.insert_as(value)
+    }
+
+    /// Inserts a smart pointer produced by `func`, returning a key typed with
+    /// the source `SourcePtr::Target`. The closure receives the backing key.
+    #[inline]
+    pub fn insert_as_with_key<SourcePtr>(
+        &mut self,
+        func: impl FnOnce(M::Key) -> SourcePtr,
+    ) -> CastKey<SourcePtr::Target, M::Key>
+    where
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr::Target: Pointee<Metadata: Copy>,
+    {
+        self.inner.insert_as_with_key(func)
+    }
+
+    /// Fallible version of [`insert_as_with_key`](Self::insert_as_with_key).
+    #[inline]
+    pub fn try_insert_as_with_key<SourcePtr, E>(
+        &mut self,
+        func: impl FnOnce(M::Key) -> Result<SourcePtr, E>,
+    ) -> Result<CastKey<SourcePtr::Target, M::Key>, E>
+    where
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr::Target: Pointee<Metadata: Copy>,
+    {
+        self.inner.try_insert_as_with_key(func)
+    }
+
     // ── cast_key_of ──────────────────────────────────────────────────────
 
     /// Converts a backing `slotmap` key into a [`CastKey`] by reading pointer

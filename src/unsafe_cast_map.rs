@@ -363,6 +363,70 @@ where
         Ok(saved_key.unwrap())
     }
 
+    // ── insert_as ────────────────────────────────────────────────────────
+
+    /// Inserts a smart pointer whose (possibly unsized) target differs from
+    /// the map's output type, returning a key typed with the *source* type
+    /// (e.g. insert a `CastBox<dyn Foo>` into a `dyn Any` map, keeping a
+    /// `CastKey<dyn Foo>`).
+    #[inline]
+    pub fn insert_as<SourcePtr>(
+        &mut self,
+        value: SourcePtr,
+    ) -> CastKey<SourcePtr::Target, M::Key>
+    where
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr::Target: Pointee<Metadata: Copy>,
+    {
+        self.insert_as_with_key(|_| value)
+    }
+
+    /// Inserts a smart pointer produced by `func`, returning a key typed with
+    /// the source `SourcePtr::Target`. The closure receives the backing key
+    /// (not a typed [`CastKey`] — the metadata does not exist until the value
+    /// does).
+    #[inline]
+    pub fn insert_as_with_key<SourcePtr>(
+        &mut self,
+        func: impl FnOnce(M::Key) -> SourcePtr,
+    ) -> CastKey<SourcePtr::Target, M::Key>
+    where
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr::Target: Pointee<Metadata: Copy>,
+    {
+        self.try_insert_as_with_key(|key| Ok::<_, ()>(func(key)))
+            .unwrap()
+    }
+
+    /// Like [`insert_as_with_key`](Self::insert_as_with_key) but the closure
+    /// may return `Err`, in which case nothing is inserted.
+    #[inline]
+    pub fn try_insert_as_with_key<SourcePtr, E>(
+        &mut self,
+        func: impl FnOnce(M::Key) -> Result<SourcePtr, E>,
+    ) -> Result<CastKey<SourcePtr::Target, M::Key>, E>
+    where
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr::Target: Pointee<Metadata: Copy>,
+    {
+        let mut saved_metadata: Option<<SourcePtr::Target as Pointee>::Metadata> = None;
+
+        let inner_key = self
+            .inner
+            .try_insert_with_key(|inner_key| -> Result<M::Value, E> {
+                let concrete: SourcePtr = func(inner_key)?;
+                // Source-typed metadata, read before the coercion erases it;
+                // the coercion never changes the allocation's address.
+                saved_metadata =
+                    Some(std::ptr::metadata(&*concrete as *const SourcePtr::Target));
+                Ok(concrete)
+            })?;
+
+        // SAFETY: `metadata` was read from the exact value now living under
+        // `inner_key`.
+        Ok(unsafe { CastKey::from_raw_parts(inner_key, saved_metadata.unwrap()) })
+    }
+
     // ── cast_key_of ──────────────────────────────────────────────────────
 
     /// Converts a backing `slotmap` key into a full [`CastKey`] by reading the
