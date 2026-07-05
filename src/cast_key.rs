@@ -14,7 +14,6 @@
 //! value. For dyn dispatch on a key, see [`DynKey`](crate::dyn_key::DynKey) /
 //! [`as_dyn`](CastKey::as_dyn).
 
-use std::ptr;
 use std::ptr::Pointee;
 
 use slotmap::{DefaultKey, Key, KeyData};
@@ -34,7 +33,7 @@ where
     <T as Pointee>::Metadata: Copy,
 {
     pub(crate) key: K,
-    dd: *const T,
+    pub(crate) metadata: <T as Pointee>::Metadata,
 }
 
 impl<T: ?Sized + Pointee, K: Key> Clone for CastKey<T, K>
@@ -95,7 +94,7 @@ where
     /// Returns the pointer metadata for `T`.
     #[inline]
     pub fn metadata(&self) -> <T as Pointee>::Metadata {
-        std::ptr::metadata(self.dd)
+        self.metadata
     }
 
     /// Strips the pointer metadata, producing the backing `slotmap` key.
@@ -120,11 +119,11 @@ where
         T: std::marker::Unsize<U>,
         <U as Pointee>::Metadata: Copy,
     {
-        let dummy: *const T = std::ptr::from_raw_parts(std::ptr::null::<()>(), self.metadata());
+        let dummy: *const T = std::ptr::from_raw_parts(std::ptr::null::<()>(), self.metadata);
         let upcast: *const U = dummy;
         CastKey {
             key: self.key,
-            dd: std::ptr::from_raw_parts(ptr::null::<()>(), std::ptr::metadata(upcast)),
+            metadata: std::ptr::metadata(upcast),
         }
     }
 
@@ -134,9 +133,6 @@ where
     /// `metadata` must be valid for the value identified by `key`.
     #[inline]
     pub unsafe fn from_raw_parts(key: K, metadata: <T as Pointee>::Metadata) -> Self {
-        Self {
-            key,
-            dd: std::ptr::from_raw_parts(ptr::null::<()>(), metadata),
-        }
+        Self { key, metadata }
     }
 }
