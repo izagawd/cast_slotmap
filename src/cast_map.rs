@@ -6,8 +6,8 @@
 //! them safe: every value lives in a box that records its concrete
 //! [`TypeId`] (see [`ConcreteTypeId`]), and a lookup recovers the type id
 //! implied by the key's metadata (via [`type_id_from_meta`]) and compares it to
-//! the slot's. A mismatch — wrong type, recycled slot, or a key minted by
-//! another map for a different type — returns `None` instead of risking UB.
+//! the slot's. A mismatch — wrong type or recycled slot — returns `None`
+//! instead of risking UB.
 //!
 //! Soundness, briefly: `slotmap`'s version check proves the slot is occupied
 //! and current; the type-id check proves the key's metadata describes the
@@ -406,7 +406,7 @@ where
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    /// Mints a concrete-typed key from a backing `slotmap` key by comparing
+    /// Builds a concrete-typed key from a backing `slotmap` key by comparing
     /// the slot's stored type id with `TypeId::of::<Concrete>()`. Returns
     /// `None` if the key is stale or the stored type differs.
     ///

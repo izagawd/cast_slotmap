@@ -13,7 +13,7 @@
 //! can be invoked on a dangling/null data pointer: only the metadata (vtable)
 //! is consulted. That is what lets [`type_id_from_meta`] turn a
 //! [`CastKey`](crate::cast_key::CastKey)'s stored metadata into a [`TypeId`]
-//! without ever dereferencing anything.
+//! without a live value.
 //!
 //! Dispatch summary for `type_id_from_meta::<T>(meta)`:
 //! - `T` sized          → `TypeId::of::<T>()`              (static, metadata is `()`)

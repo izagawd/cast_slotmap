@@ -112,7 +112,7 @@ fn remove_wrong_type_is_rejected() {
     let dog_key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Kept".into() }));
 
     // Forge a `Cat`-typed key naming the same slot; the type check refuses it.
-    // SAFETY of the test's premise: `from_raw_parts` is the unsafe minting
+    // SAFETY of the test's premise: `from_raw_parts` is the unsafe key-construction
     // path — the map must remain safe against exactly this.
     let wrong: CastKey<Cat> = unsafe { CastKey::from_raw_parts(dog_key.inner_key(), ()) };
     assert!(map.remove(wrong).is_none());
@@ -277,7 +277,9 @@ fn drain_empties_and_yields() {
 fn index_reads() {
     let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
     let key: CastKey<u32> = map.insert_sized(CastBox::new(41u32));
-    assert_eq!(*map.get(key).unwrap(), 41);
+    // Index is generic over the key's type: a concrete-typed index into a
+    // `dyn Any` map yields the concrete reference.
+    assert_eq!(map[key], 41);
 }
 
 // ─── capacity / with_capacity ────────────────────────────────────────────────
@@ -297,13 +299,13 @@ fn clone_keys_stay_valid() {
     // `Clone` (its inner `Box<T: ?Sized>` isn't), so the checked box maps are
     // never `Clone`; the unsafe map storing `Box<u32>` is, and demonstrates
     // the shared semantics: checking is by slot version (plus, on the checked
-    // layer, stored type id), so keys minted by the original remain valid on
-    // the clone.
+    // layer, stored type id), so keys handed out by the original remain valid
+    // on the clone.
     let mut map: UnsafeBoxCastMap<DefaultKey, u32> = UnsafeBoxCastMap::new();
     let key: CastKey<u32> = map.insert(Box::new(7u32));
 
     let clone = map.clone();
-    // SAFETY: same slot layout in the clone; the key was minted for a `u32`
+    // SAFETY: same slot layout in the clone; the key was issued for a `u32`
     // slot and the clone stores the same type.
     assert_eq!(*unsafe { clone.get(key) }.unwrap(), 7);
     assert_eq!(*unsafe { map.get(key) }.unwrap(), 7);
@@ -444,7 +446,7 @@ fn slice_target_metadata_roundtrip() {
     // use case.
     let mut map: UnsafeBoxCastMap<DefaultKey, [u32]> = UnsafeBoxCastMap::new();
     let key: CastKey<[u32]> = map.insert(vec![1u32, 2, 3].into_boxed_slice());
-    // SAFETY: key was just minted for this slot; metadata (the length) is valid.
+    // SAFETY: key was just issued for this slot; metadata (the length) is valid.
     assert_eq!(unsafe { map.get(key) }.unwrap(), &[1, 2, 3]);
 
     // SAFETY: same key, slot unchanged.
@@ -553,7 +555,7 @@ fn insert_as_with_key_threads_backing_key() {
     let mut map: AnyMap = AnyMap::new();
     // Unlike `insert_sized_with_key`, the closure receives only the backing
     // `slotmap` key: the pointer metadata does not exist until the value is
-    // constructed, so a typed `CastKey` cannot be minted up front.
+    // constructed, so a typed `CastKey` cannot be built up front.
     let mut captured = None;
     let key: CastKey<dyn Pet> = map.insert_as_with_key(|k| {
         captured = Some(k);

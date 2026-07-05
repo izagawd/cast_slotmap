@@ -3,9 +3,8 @@
 //! [`CastKey<T, K>`] stores a `slotmap` key alongside `T`'s pointer metadata.
 //! It is the bare key of [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG);
 //! the checked [`CastMapG`](crate::cast_map::CastMapG) uses the *same* key type
-//! and instead validates lookups against each slot's stored concrete
-//! [`TypeId`](std::any::TypeId) (see [`ConcreteTypeId`](crate::cast_box::ConcreteTypeId)),
-//! so no extra map-identity wrapper is needed.
+//! and validates lookups against each slot's stored concrete
+//! [`TypeId`](std::any::TypeId) (see [`ConcreteTypeId`](crate::cast_box::ConcreteTypeId)).
 //!
 //! `CastKey` is not a `slotmap::Key`; the map wrappers convert at the boundary
 //! via [`inner_key`](CastKey::inner_key).

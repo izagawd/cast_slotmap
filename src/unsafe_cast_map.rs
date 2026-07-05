@@ -116,7 +116,7 @@ where
     /// Consumes this map and returns the backing `slotmap` map.
     ///
     /// # Safety
-    /// Keys minted by this map cache pointer metadata for the values as
+    /// Keys handed out by this map cache pointer metadata for the values as
     /// stored; anything done to the backing map directly (or to values moved
     /// out of it) that changes which concrete type lives under a still-held
     /// key makes that key's metadata stale, and using it with the typed
@@ -678,7 +678,7 @@ where
     /// rather than a raw backing key.
     ///
     /// Reattaching a value whose concrete type differs from the original leaves
-    /// any [`CastKey`] previously minted for that slot with stale pointer
+    /// any [`CastKey`] previously issued for that slot with stale pointer
     /// metadata; using such a key with the `unsafe` typed accessors is then
     /// undefined behavior. This hazard is why `reattach` lives only on the
     /// unsafe map and not on the checked

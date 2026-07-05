@@ -16,10 +16,10 @@
 //! Which of the two representations the address holds is decided by a
 //! compile-time check of the actual types involved
 //! (`size_of::<KeyData>() <= size_of::<usize>()`):
-//! - **Fits:** the address is the key's packed [`KeyData`]
-//!   ([`KeyData::as_ffi`], whose only documented guarantee — round-tripping
-//!   through [`KeyData::from_ffi`] — is the only property relied on). The
-//!   smuggled address is **never dereferenced** on this path.
+//! - **Fits:** the address is the key's packed [`KeyData`] via
+//!   [`KeyData::as_ffi`], relying only on its documented guarantee:
+//!   round-tripping through [`KeyData::from_ffi`]. The smuggled address is
+//!   **never dereferenced** on this path.
 //! - **Does not fit:** the address is a real pointer to the borrowed
 //!   `CastKey`, which the `'a` borrow keeps alive.
 //!
@@ -118,11 +118,7 @@ where
     pub fn new(key: &'a CastKey<T, K>) -> Self {
         let thin: NonNull<()> = if const { fits_inline() } {
             let packed = key.inner_key().data().as_ffi() as usize;
-            // Nonzero is verified here, not assumed from `as_ffi`'s layout:
-            // if a future `slotmap` ever packed a key to `0`, this panics
-            // instead of constructing an invalid `NonNull`. Today every
-            // `KeyData` holds a `NonZeroU32` version, so the check always
-            // passes and folds away.
+            // Runtime-verified nonzero; see the module docs.
             let packed = NonZeroUsize::new(packed)
                 .expect("slotmap KeyData::as_ffi produced 0, which DynKey cannot pack");
             NonNull::without_provenance(packed)
