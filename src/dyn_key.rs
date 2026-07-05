@@ -6,7 +6,7 @@
 //! (32- vs 64-bit) while the key is a fixed 8 bytes — and `slotmap` plans to
 //! let users pick the size of their keys — so the key cannot be relied on to
 //! fit in, or match, a pointer.
-//! `DynKey` re-expresses the same information as a single fat `NonNull<T>`:
+//! `DynKey` re-expresses the same information as a single `*const T`:
 //! the *metadata* half carries the key's pointer metadata (the vtable for
 //! `dyn` targets), and the *address* half smuggles the backing `slotmap` key.
 //! That makes `DynKey` layout-compatible with dyn dispatch, so traits can
@@ -30,17 +30,20 @@
 //!
 //! The smuggled address is **never dereferenced** on the first two paths.
 //!
-//! Nonzero: `NonNull` needs a nonzero address, and on the packed paths that is
-//! **checked at runtime** rather than assumed — construction panics if the
-//! packed value were ever `0`. In practice it never is (every `KeyData`
-//! contains a `NonZeroU32` version), the check folds away under optimization,
-//! and the `NonNull` niche means `Option<DynKey>` costs no extra space; but
-//! correctness does not depend on `as_ffi`'s bit layout.
+//! Why a raw pointer and not [`NonNull`](std::ptr::NonNull): `NonNull` would
+//! demand a nonzero address, but on the packed paths, the address is whatever
+//! [`KeyData::as_ffi`] returns, and its *only* documented guarantee is the
+//! [`KeyData::from_ffi`] round-trip — nothing promises the value is nonzero.
+//! (Today it happens never to be `0`, since every `KeyData` carries a
+//! `NonZeroU32` version, but that is an implementation detail, not a
+//! contract.) A raw pointer carries any address, `0` included, so construction
+//! is infallible — no runtime check, no panic path, and no dependence on
+//! `as_ffi`'s bit layout at all. The trade-off is that `Option<DynKey>` gets
+//! no pointer niche, so it is larger than a bare `DynKey`.
 
 use std::marker::{PhantomData, Unsize};
-use std::num::NonZeroUsize;
 use std::ops::{CoerceUnsized, DispatchFromDyn, Receiver};
-use std::ptr::{NonNull, Pointee};
+use std::ptr::{self, Pointee};
 
 use slotmap::{DefaultKey, Key, KeyData};
 
@@ -82,8 +85,10 @@ const fn smaller_than_ptr() -> bool {
 pub struct DynKey<'a, T: ?Sized, K: Key = DefaultKey> {
     /// Address = packed `KeyData` (or a pointer to the borrowed key's `K`
     /// field when packing does not fit); metadata = the `CastKey`'s pointer
-    /// metadata.
-    ptr: NonNull<T>,
+    /// metadata. Raw — and thus allowed to be null — on purpose: the packed
+    /// value has no nonzero guarantee (see the module docs). Never
+    /// dereferenced as a `T`.
+    ptr: *const T,
     _borrow: PhantomData<&'a K>,
 }
 
@@ -137,19 +142,10 @@ where
     /// Borrows a [`CastKey`] into its dyn-dispatchable form.
     #[inline]
     pub fn new(key: &'a CastKey<T, K>) -> Self {
-        let thin: NonNull<()> = if const { equals_ptr() } {
-            let packed = key.inner_key().data().as_ffi() as usize;
-            // Runtime-verified nonzero; see the module docs.
-            let packed = NonZeroUsize::new(packed)
-                .expect("slotmap KeyData::as_ffi produced 0, which DynKey cannot pack");
-            NonNull::without_provenance(packed)
-        } else if const { smaller_than_ptr() } {
-            // Zero-extends into the wider address.
-            let packed = key.inner_key().data().as_ffi() as usize;
-            // Runtime-verified nonzero; see the module docs.
-            let packed = NonZeroUsize::new(packed)
-                .expect("slotmap KeyData::as_ffi produced 0, which DynKey cannot pack");
-            NonNull::without_provenance(packed)
+        let thin: *const () = if const { equals_ptr() || smaller_than_ptr() } {
+            // Packed `as_ffi` value as the address (zero-extends if usize is
+            // wider); pure data, never dereferenced, 0 is fine — see module docs.
+            ptr::without_provenance(key.inner_key().data().as_ffi() as usize)
         } else {
             // The key does not fit in a pointer on this target: point at the
             // borrowed key's backing `K` field. `K` is the same type for
@@ -157,10 +153,10 @@ where
             // coercion changes `T` (reading the whole `CastKey<T, K>` could
             // not: its layout differs per `T`). Valid for 'a; provenance is
             // preserved through from/to_raw_parts.
-            NonNull::from(&key.key).cast()
+            ptr::from_ref(&key.key).cast()
         };
         Self {
-            ptr: NonNull::from_raw_parts(thin, key.metadata()),
+            ptr: ptr::from_raw_parts(thin, key.metadata()),
             _borrow: PhantomData,
         }
     }
@@ -172,7 +168,7 @@ where
         if const { equals_ptr() || smaller_than_ptr() } {
             // `from_ffi(as_ffi(k)) == k` is the documented round-trip
             // guarantee; nothing about the value's layout is relied on.
-            let key = K::from(KeyData::from_ffi(thin.addr().get() as u64));
+            let key = K::from(KeyData::from_ffi(thin.addr() as u64));
             // SAFETY: `key`/`metadata` round-trip the exact values of the
             // `CastKey` given to `new`, whose construction already vouched
             // for the metadata.
