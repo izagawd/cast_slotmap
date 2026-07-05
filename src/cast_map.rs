@@ -366,9 +366,8 @@ where
     #[inline]
     pub fn downcast_key<Concrete: 'static>(
         &self,
-        key: impl Into<CastKey<dyn Any, M::Key>>,
+        key: CastKey<dyn Any, M::Key>,
     ) -> Option<CastKey<Concrete, M::Key>> {
-        let key = key.into();
         let stored = self.inner.inner.get(key.inner_key())?;
         if stored.concrete_type_id() == TypeId::of::<Concrete>() {
             // SAFETY: `()` metadata is trivially valid for the sized
@@ -384,7 +383,7 @@ where
     #[inline]
     pub fn contains_key<T: ?Sized + AnyHaver + Pointee>(
         &self,
-        key: impl Into<CastKey<T, M::Key>>,
+        key: CastKey<T, M::Key>,
     ) -> bool
     where
         <T as Pointee>::Metadata: Copy,
@@ -392,8 +391,7 @@ where
         self.get(key).is_some()
     }
 
-    /// Typed lookup by [`CastKey`] (or anything convertible into one, such as
-    /// [`DynKey`](crate::dyn_key::DynKey)). Returns `None` if the slot is
+    /// Typed lookup by [`CastKey`]. Returns `None` if the slot is
     /// vacant, the key is stale, or the key's type does not match the value at
     /// that slot.
     ///
@@ -404,12 +402,11 @@ where
     #[inline]
     pub fn get<T: ?Sized + AnyHaver + Pointee>(
         &self,
-        key: impl Into<CastKey<T, M::Key>>,
+        key: CastKey<T, M::Key>,
     ) -> Option<&T>
     where
         <T as Pointee>::Metadata: Copy,
     {
-        let key = key.into();
         let stored = self.inner.inner.get(key.inner_key())?;
         let stored_tid = stored.concrete_type_id();
         let base: &MTarget<M> = &**stored;
@@ -442,13 +439,12 @@ where
     #[inline]
     pub fn remove<'a, T: ?Sized + AnyHaver + Pointee>(
         &mut self,
-        key: impl Into<CastKey<T, M::Key>>,
+        key: CastKey<T, M::Key>,
     ) -> Option<<M::Value as RetypePtr<'a>>::Retyped<T>>
     where
         <T as Pointee>::Metadata: Copy,
         M::Value: RetypePtr<'a>,
     {
-        let key = key.into();
         let stored = self.inner.inner.get(key.inner_key())?;
         if stored.concrete_type_id() != type_id_from_meta::<T>(key.metadata()) {
             return None;
@@ -468,17 +464,16 @@ where
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    /// Mutable typed lookup by [`CastKey`] (or anything convertible into one).
+    /// Mutable typed lookup by [`CastKey`].
     /// Type-id validated, like [`get`](Self::get).
     #[inline]
     pub fn get_mut<T: ?Sized + AnyHaver + Pointee>(
         &mut self,
-        key: impl Into<CastKey<T, M::Key>>,
+        key: CastKey<T, M::Key>,
     ) -> Option<&mut T>
     where
         <T as Pointee>::Metadata: Copy,
     {
-        let key = key.into();
         let stored = self.inner.inner.get_mut(key.inner_key())?;
         if stored.concrete_type_id() != type_id_from_meta::<T>(key.metadata()) {
             return None;

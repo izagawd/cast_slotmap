@@ -340,8 +340,7 @@ trait Pet: Any {
 
 impl Pet for Dog {
     fn speak(self: DynKey<'_, Self>, map: &AnyMap) -> String {
-        // `get` accepts the DynKey directly (Into<CastKey>).
-        format!("woof {}", map.get(self).unwrap().name)
+        format!("woof {}", map.get(self.key()).unwrap().name)
     }
 }
 
