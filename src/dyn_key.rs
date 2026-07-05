@@ -6,32 +6,31 @@
 //! (32- vs 64-bit) while the key is a fixed 8 bytes — and `slotmap` plans to
 //! let users pick the size of their keys — so the key cannot be relied on to
 //! fit in, or match, a pointer.
-//! `DynKey` re-expresses the same information as a single `*const T`:
+//! `DynKey` re-expresses the same information as a single fat `*const T`:
 //! the *metadata* half carries the key's pointer metadata (the vtable for
 //! `dyn` targets), and the *address* half smuggles the backing `slotmap` key.
 //! That makes `DynKey` layout-compatible with dyn dispatch, so traits can
 //! declare methods as `fn m(self: DynKey<Self>, ...)` and be called through
 //! `DynKey<dyn Trait>`.
 //!
-//! Which representation the address holds is decided by compile-time checks
-//! of the actual types involved, in three tiers (`u64` being the packed
-//! form's type, confirmed at compile time against `as_ffi` / `from_ffi`):
-//! - **`size_of::<u64>() == size_of::<usize>()`:** the address is the
-//!   key's packed [`KeyData`] via [`KeyData::as_ffi`], relying only on its
-//!   documented guarantee — round-tripping through [`KeyData::from_ffi`] —
+//! Which representation the address holds is decided by a compile-time check
+//! of the actual types involved (`u64` being the packed form's type,
+//! confirmed at compile time against `as_ffi` / `from_ffi`):
+//! - **`size_of::<u64>() <= size_of::<usize>()`:** the address is the
+//!   key's packed [`KeyData`] via [`KeyData::as_ffi`] — zero-extended when
+//!   the address is wider (e.g. a 128-bit target) — relying only on its
+//!   documented guarantee (round-tripping through [`KeyData::from_ffi`]),
 //!   never the key's byte layout, which could contain padding.
-//! - **`size_of::<u64>() < size_of::<usize>()`** (e.g. a 128-bit
-//!   target): same packing; the `as_ffi` value zero-extends into the wider
-//!   address.
-//! - **Otherwise:** the address is a real pointer to the borrowed key's
-//!   backing `K` field, which the `'a` borrow keeps alive. Only `K` is read
-//!   back (its type is the same for every `T`); the metadata always travels
-//!   in the fat pointer itself, where unsizing coercions keep it correct.
+//! - **Otherwise** (e.g. a 32-bit target): the address is a real pointer to
+//!   the borrowed key's backing `K` field, which the `'a` borrow keeps
+//!   alive. Only `K` is read back (its type is the same for every `T`); the
+//!   metadata always travels in the fat pointer itself, where unsizing
+//!   coercions keep it correct.
 //!
-//! The smuggled address is **never dereferenced** on the first two paths.
+//! The smuggled address is **never dereferenced** on the packed path.
 //!
 //! Why a raw pointer and not [`NonNull`](std::ptr::NonNull): `NonNull` would
-//! demand a nonzero address, but on the packed paths, the address is whatever
+//! demand a nonzero address, but on the packed path, the address is whatever
 //! [`KeyData::as_ffi`] returns, and its *only* documented guarantee is the
 //! [`KeyData::from_ffi`] round-trip — nothing promises the value is nonzero.
 //! (Today it happens never to be `0`, since every `KeyData` carries a
@@ -50,23 +49,17 @@ use slotmap::{DefaultKey, Key, KeyData};
 use crate::cast_key::CastKey;
 
 // Compile-time confirmation that the packed form really is `u64`: these fail
-// to compile if `as_ffi` / `from_ffi` ever change signature. The tiers below
-// compare `u64` — the type that actually crosses — against the pointer size.
+// to compile if `as_ffi` / `from_ffi` ever change signature. The check below
+// compares `u64` — the type that actually crosses — against the pointer size.
 const _: fn(KeyData) -> u64 = KeyData::as_ffi;
 const _: fn(u64) -> KeyData = KeyData::from_ffi;
 
-/// Is a packed key (a `u64`, confirmed above) exactly the size of a pointer
-/// address? Decided from the types themselves, per target.
+/// Does a packed key (a `u64`, confirmed above) fit in a pointer address —
+/// equal in size, or smaller (e.g. a 128-bit target)? Decided from the types
+/// themselves, per target.
 #[inline]
-const fn equals_ptr() -> bool {
-    size_of::<u64>() == size_of::<usize>()
-}
-
-/// Is a packed key (a `u64`, confirmed above) smaller than a pointer address
-/// (e.g. a 128-bit target)? Decided from the types themselves, per target.
-#[inline]
-const fn smaller_than_ptr() -> bool {
-    size_of::<u64>() < size_of::<usize>()
+const fn packs_in_ptr() -> bool {
+    size_of::<u64>() <= size_of::<usize>()
 }
 
 /// A borrowed, dyn-dispatchable form of a [`CastKey`].
@@ -142,9 +135,10 @@ where
     /// Borrows a [`CastKey`] into its dyn-dispatchable form.
     #[inline]
     pub fn new(key: &'a CastKey<T, K>) -> Self {
-        let thin: *const () = if const { equals_ptr() || smaller_than_ptr() } {
-            // Packed `as_ffi` value as the address (zero-extends if usize is
-            // wider); pure data, never dereferenced, 0 is fine — see module docs.
+        let thin: *const () = if const { packs_in_ptr() } {
+            // Packed `as_ffi` value as the address (zero-extends if `usize`
+            // is wider); pure data, never dereferenced, `0` is fine — see
+            // the module docs.
             ptr::without_provenance(key.inner_key().data().as_ffi() as usize)
         } else {
             // The key does not fit in a pointer on this target: point at the
@@ -165,7 +159,7 @@ where
     #[inline]
     pub fn key(self) -> CastKey<T, K> {
         let (thin, metadata) = self.ptr.to_raw_parts();
-        if const { equals_ptr() || smaller_than_ptr() } {
+        if const { packs_in_ptr() } {
             // `from_ffi(as_ffi(k)) == k` is the documented round-trip
             // guarantee; nothing about the value's layout is relied on.
             let key = K::from(KeyData::from_ffi(thin.addr() as u64));

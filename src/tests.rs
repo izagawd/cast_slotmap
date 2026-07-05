@@ -374,7 +374,7 @@ fn dyn_key_round_trips() {
     let mut map: AnyMap = AnyMap::new();
     let key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "RT".into() }));
 
-    // Sized target: metadata is `()`, address packs the KeyData.
+    // Sized target: metadata is `()`; only the smuggled key must round-trip.
     let back = key.as_dyn().key();
     assert_eq!(back, key);
     assert_eq!(map.get(back).unwrap().name, "RT");
