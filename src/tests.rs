@@ -360,6 +360,15 @@ impl Pet for Cat {
 }
 
 #[test]
+fn dyn_key_is_send_sync_when_castkey_is() {
+    // Compile-time assertion: `DefaultKey` is `Sync`, so `CastKey<T>` is, so
+    // `DynKey` must be `Send + Sync`. Fails to compile if the bounds regress.
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<DynKey<'static, Dog>>();
+    assert_send_sync::<DynKey<'static, dyn Pet>>();
+}
+
+#[test]
 fn dyn_key_round_trips() {
     let mut map: AnyMap = AnyMap::new();
     let key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "RT".into() }));
