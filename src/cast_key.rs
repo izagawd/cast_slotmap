@@ -13,6 +13,7 @@
 //! value. For dyn dispatch on a key, see [`DynKey`](crate::dyn_key::DynKey) /
 //! [`as_dyn`](CastKey::as_dyn).
 
+use std::ops::Receiver;
 use std::ptr::Pointee;
 
 use slotmap::{DefaultKey, Key, KeyData};
@@ -67,6 +68,14 @@ where
         self.key == other.key
     }
 }
+
+impl<T: ?Sized + Pointee, K: Key> Receiver for CastKey<T, K>
+where
+    <T as Pointee>::Metadata: Copy,
+{
+    type Target = T;
+}
+
 
 impl<T: ?Sized + Pointee, K: Key> Eq for CastKey<T, K> where <T as Pointee>::Metadata: Copy {}
 
