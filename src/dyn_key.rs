@@ -14,12 +14,13 @@
 //! `DynKey<dyn Trait>`.
 //!
 //! Which representation the address holds is decided by compile-time checks
-//! of the actual types involved, in three tiers:
-//! - **`size_of::<KeyData>() == size_of::<usize>()`:** the address is the
+//! of the actual types involved, in three tiers (`u64` being the packed
+//! form's type, confirmed at compile time against `as_ffi` / `from_ffi`):
+//! - **`size_of::<u64>() == size_of::<usize>()`:** the address is the
 //!   key's packed [`KeyData`] via [`KeyData::as_ffi`], relying only on its
 //!   documented guarantee — round-tripping through [`KeyData::from_ffi`] —
 //!   never the key's byte layout, which could contain padding.
-//! - **`size_of::<KeyData>() < size_of::<usize>()`** (e.g. a 128-bit
+//! - **`size_of::<u64>() < size_of::<usize>()`** (e.g. a 128-bit
 //!   target): same packing; the `as_ffi` value zero-extends into the wider
 //!   address.
 //! - **Otherwise:** the address is a real pointer to the borrowed key's
@@ -45,18 +46,24 @@ use slotmap::{DefaultKey, Key, KeyData};
 
 use crate::cast_key::CastKey;
 
-/// Is a packed [`KeyData`] exactly the size of a pointer address? Decided
-/// from the types themselves, per target.
+// Compile-time confirmation that the packed form really is `u64`: these fail
+// to compile if `as_ffi` / `from_ffi` ever change signature. The tiers below
+// compare `u64` — the type that actually crosses — against the pointer size.
+const _: fn(KeyData) -> u64 = KeyData::as_ffi;
+const _: fn(u64) -> KeyData = KeyData::from_ffi;
+
+/// Is a packed key (a `u64`, confirmed above) exactly the size of a pointer
+/// address? Decided from the types themselves, per target.
 #[inline]
 const fn equals_ptr() -> bool {
-    size_of::<KeyData>() == size_of::<usize>()
+    size_of::<u64>() == size_of::<usize>()
 }
 
-/// Is a packed [`KeyData`] smaller than a pointer address (e.g. a 128-bit
-/// target)? Decided from the types themselves, per target.
+/// Is a packed key (a `u64`, confirmed above) smaller than a pointer address
+/// (e.g. a 128-bit target)? Decided from the types themselves, per target.
 #[inline]
 const fn smaller_than_ptr() -> bool {
-    size_of::<KeyData>() < size_of::<usize>()
+    size_of::<u64>() < size_of::<usize>()
 }
 
 /// A borrowed, dyn-dispatchable form of a [`CastKey`].
