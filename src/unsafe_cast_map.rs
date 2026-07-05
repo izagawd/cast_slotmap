@@ -421,8 +421,10 @@ where
 
     // ── typed lookups (shared) ─────────────────────────────────────────────
 
-    /// Cross-typed shared-reference lookup. Reconstructs a fat pointer to `T`
-    /// from the stored output's data pointer and the key's metadata.
+    /// Shared-reference lookup typed by the key's `T`, which may differ from
+    /// the map's output type. Reconstructs the `&T` from the stored value's
+    /// data pointer plus the key's metadata (a vtable, a slice length, or `()`
+    /// for sized `T`).
     ///
     /// # Safety
     /// The key's pointer metadata must be valid for the data stored at that
@@ -512,7 +514,8 @@ where
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    /// Cross-typed mutable-reference lookup.
+    /// Mutable-reference lookup typed by the key's `T`, which may differ from
+    /// the map's output type; see [`get`](Self::get).
     ///
     /// # Safety
     /// The key's pointer metadata must be valid for the data stored at that slot.
@@ -568,8 +571,9 @@ where
         }
     }
 
-    /// Cross-typed mutable disjoint lookup. All keys must share the pointee type
-    /// `T`; each fat pointer to `T` is rebuilt from that key's own metadata.
+    /// Mutable disjoint lookup typed by the keys' `T`, which may differ from
+    /// the map's output type. All keys must share the pointee type `T`; each
+    /// `&mut T` is rebuilt from that key's own metadata.
     /// Returns `None` if any key is invalid or two keys alias the same slot.
     ///
     /// # Safety

@@ -48,8 +48,8 @@ unsafe impl<T: 'static> AnyHaver for T {}
 
 /// Recovers a [`TypeId`] from a value's pointer `metadata`, without a value.
 ///
-/// Builds a fat pointer with a null data address and the supplied metadata,
-/// then asks it for its `TypeId`. No memory is read.
+/// Builds a `*const T` from a null data address and the supplied metadata,
+/// then asks it for its `TypeId`. 
 #[inline]
 pub fn type_id_from_meta<T: ?Sized + AnyHaver + Pointee>(
     metadata: <T as Pointee>::Metadata,

@@ -400,8 +400,6 @@ where
     }
 }
 
-// ─── Checked cross-typed lookups (safe — type-id validated) ──────────────────
-
 impl<M> CastMapG<M>
 where
     M: SlotMapTrait,
@@ -568,9 +566,10 @@ where
         self.inner.iter_mut()
     }
 
-    /// Cross-typed mutable disjoint lookup. All keys must share the pointee
-    /// type `T`. Returns `None` if any key is stale, mistyped for its slot, or
-    /// two keys alias the same slot.
+    /// Mutable disjoint lookup typed by the keys' `T`, which may differ from
+    /// the map's output type. All keys must share the pointee type `T`.
+    /// Returns `None` if any key is stale, mistyped for its slot, or two keys
+    /// alias the same slot.
     #[inline]
     pub fn get_disjoint_mut<T: ?Sized + AnyHaver + Pointee, const N: usize>(
         &mut self,
@@ -592,8 +591,8 @@ where
         unsafe { self.inner.get_disjoint_mut(keys) }
     }
 
-    /// Cross-typed mutable disjoint lookup without validity, uniqueness, or
-    /// type checks.
+    /// Like [`get_disjoint_mut`](Self::get_disjoint_mut) but without validity,
+    /// uniqueness, or type checks.
     ///
     /// # Safety
     /// - Every key must address a live slot, and no two keys may alias one slot.
