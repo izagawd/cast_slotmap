@@ -4,7 +4,7 @@
 
 use std::any::Any;
 
-use crate::any_haver::type_id_from_meta;
+use crate::any_haver::{type_id_from_meta, AnyHaver};
 use crate::cast_box::CastBox;
 use crate::cast_key::CastKey;
 use crate::cast_map::BoxCastMap;
@@ -39,12 +39,18 @@ fn insert_then_downcast_typed_get() {
 }
 
 #[test]
-fn typed_get_through_erased_key() {
+fn typed_get_and_downcast_via_upcast() {
     let mut map: AnyMap = AnyMap::new();
-    // `insert` already yields the erased key.
-    let dyn_key = map.insert(CastBox::new(Dog { name: "Fido".into() }));
-    let as_any: &dyn Any = map.get(dyn_key).unwrap();
-    assert_eq!(as_any.downcast_ref::<Dog>().unwrap().name, "Fido");
+    // `dyn Any` does not implement `AnyHaver` (no supertrait), so a checked
+    // `map.get(dyn_key)` would not compile. `insert_sized` yields the typed
+    // key for the checked get; `upcast` supplies the erased key for
+    // `downcast_key`.
+    let key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Fido".into() }));
+    assert_eq!(map.get(key).unwrap().name, "Fido");
+
+    let dyn_key: CastKey<dyn Any> = key.upcast();
+    let recovered: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
+    assert_eq!(map.get(recovered).unwrap().name, "Fido");
 }
 
 // ─── insert_sized: typed key straight from insertion ─────────────────────────
@@ -55,9 +61,8 @@ fn insert_sized_gives_typed_key() {
     let key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Sz".into() }));
     assert_eq!(map.get(key).unwrap().name, "Sz");
 
-    // The same slot is reachable through the upcast erased key.
-    let erased: CastKey<dyn Any> = key.upcast();
-    assert!(map.get(erased).unwrap().is::<Dog>());
+    // The same slot is reachable through the backing key, type-erased.
+    assert!(map.get_by_inner_key(key.inner_key()).unwrap().is::<Dog>());
 }
 
 // ─── upcast + downcast_key ───────────────────────────────────────────────────
@@ -263,15 +268,15 @@ fn drain_empties_and_yields() {
     assert!(map.is_empty());
 }
 
-// ─── Index / IndexMut (via the erased key) ───────────────────────────────────
+// ─── Index (sized output map) ────────────────────────────────────────────────
+// `Index` requires the map's output type itself to be `AnyHaver`, which
+// `dyn Any` is not — so indexing is exercised on a sized-output map.
 
 #[test]
-fn index_via_erased_key() {
-    let mut map: AnyMap = AnyMap::new();
-    let dyn_key = map.insert(CastBox::new(Dog { name: "Idx".into() }));
-
-    let as_any: &dyn Any = &map[dyn_key];
-    assert_eq!(as_any.downcast_ref::<Dog>().unwrap().name, "Idx");
+fn index_reads() {
+    let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
+    let key: CastKey<u32> = map.insert_sized(CastBox::new(41u32));
+    assert_eq!(*map.get(key).unwrap(), 41);
 }
 
 // ─── capacity / with_capacity ────────────────────────────────────────────────
@@ -334,7 +339,7 @@ fn insert_sized_with_key_threads_typed_key() {
 
 // ─── DynKey: round-trip + dyn dispatch through the key's metadata ────────────
 
-trait Pet: Any {
+trait Pet: AnyHaver {
     fn speak(self: DynKey<'_, Self>, map: &AnyMap) -> String;
 }
 
@@ -537,13 +542,12 @@ mod dense {
     }
 
     #[test]
-    fn erased_get_and_downcast_key() {
+    fn typed_get_and_downcast_key() {
         let mut map: AnyMap = AnyMap::new();
-        let dyn_key = map.insert(CastBox::new(Dog { name: "Fido".into() }));
+        let key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Fido".into() }));
+        assert_eq!(map.get(key).unwrap().name, "Fido");
 
-        let as_any: &dyn Any = map.get(dyn_key).unwrap();
-        assert_eq!(as_any.downcast_ref::<Dog>().unwrap().name, "Fido");
-
+        let dyn_key: CastKey<dyn Any> = key.upcast();
         let recovered: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
         assert_eq!(map.get(recovered).unwrap().name, "Fido");
         assert!(map.downcast_key::<Cat>(dyn_key).is_none());

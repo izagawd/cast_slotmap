@@ -18,7 +18,9 @@ use std::ptr::Pointee;
 
 /// Blanket-implemented for all `'static` types; exposes the concrete [`TypeId`]
 /// through a raw-`self` method so it works on metadata alone.
-pub trait AnyHaver: 'static {
+/// # Safety
+/// Don't implement this trait customly
+pub unsafe  trait AnyHaver: 'static {
     /// Returns the [`TypeId`] of the (possibly type-erased) `Self`.
     ///
     /// Takes `*const Self` instead of `&self` so it is callable on a null /
@@ -29,7 +31,7 @@ pub trait AnyHaver: 'static {
     }
 }
 
-impl<T: 'static + ?Sized> AnyHaver for T {}
+unsafe impl<T: 'static> AnyHaver for T {}
 
 /// Recovers a [`TypeId`] from a value's pointer `metadata`, without a value.
 ///
