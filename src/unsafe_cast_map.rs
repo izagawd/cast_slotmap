@@ -25,10 +25,11 @@
 //! (both `slotmap` maps support them) but **not** on the checked
 //! [`CastMapG`](crate::cast_map::CastMapG): reattaching a different concrete type
 //! under an existing key would leave that key's cached pointer metadata stale,
-//! so it is left to the caller's `unsafe` discipline for now. There is
-//! intentionally **no** `get_slot`,
-//! `get_by_index_only`, `reset`, or `unsafe_clone` / `clone_mut` family:
-//! `slotmap` exposes none of those. `iter` is a plain safe shared iterator
+//! so it is left to the caller's `unsafe` discipline. There is
+//! intentionally **no** `get_slot`, `get_by_index_only`, or `reset`
+//! (`slotmap` exposes no such operations), and no `unsafe_clone` /
+//! `clone_mut` family (plain `Clone` suffices under the `&mut self` mutation
+//! model). `iter` is a plain safe shared iterator
 //! because `slotmap`'s `get` borrows `&self` while `insert` borrows `&mut self`,
 //! so a live reference can never coexist with an insert.
 
@@ -250,7 +251,8 @@ where
 {
     // ── insert ───────────────────────────────────────────────────────────
 
-    /// Inserts a smart pointer, returning a key with metadata.
+    /// Inserts a smart pointer, returning the erased-target [`CastKey`]
+    /// (`CastKey<MTarget<M>, M::Key>`, metadata read from the stored value).
     #[inline]
     pub fn insert(&mut self, value: M::Value) -> CastKey<MTarget<M>, M::Key> {
         self.insert_with_key(|_| value)
@@ -437,8 +439,8 @@ where
         let stored = self.inner.get(key.inner_key())?;
         let base: &MTarget<M> = &**stored;
         let data_ptr: *const () = (base as *const MTarget<M>).cast();
-        let fat_ptr: *const T = std::ptr::from_raw_parts(data_ptr, key.metadata());
-        Some(&*fat_ptr)
+        let typed_ptr: *const T = std::ptr::from_raw_parts(data_ptr, key.metadata());
+        Some(&*typed_ptr)
     }
 
     /// Shared-reference lookup without bounds or version checks.
@@ -454,8 +456,8 @@ where
         let stored = self.inner.get_unchecked(key.inner_key());
         let base: &MTarget<M> = &**stored;
         let data_ptr: *const () = (base as *const MTarget<M>).cast();
-        let fat_ptr: *const T = std::ptr::from_raw_parts(data_ptr, key.metadata());
-        &*fat_ptr
+        let typed_ptr: *const T = std::ptr::from_raw_parts(data_ptr, key.metadata());
+        &*typed_ptr
     }
 
     /// Removes an element by its [`CastKey`], returning the owned smart pointer
@@ -527,8 +529,8 @@ where
         let stored = self.inner.get_mut(key.inner_key())?;
         let base: &mut MTarget<M> = &mut **stored;
         let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
-        let fat_ptr: *mut T = std::ptr::from_raw_parts_mut(data_ptr, key.metadata());
-        Some(&mut *fat_ptr)
+        let typed_ptr: *mut T = std::ptr::from_raw_parts_mut(data_ptr, key.metadata());
+        Some(&mut *typed_ptr)
     }
 
     /// Mutable-reference lookup without bounds or version checks.
@@ -547,8 +549,8 @@ where
         let stored = self.inner.get_unchecked_mut(key.inner_key());
         let base: &mut MTarget<M> = &mut **stored;
         let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
-        let fat_ptr: *mut T = std::ptr::from_raw_parts_mut(data_ptr, key.metadata());
-        &mut *fat_ptr
+        let typed_ptr: *mut T = std::ptr::from_raw_parts_mut(data_ptr, key.metadata());
+        &mut *typed_ptr
     }
 
     /// Retains only elements for which `f(key, &mut output)` returns `true`.
@@ -653,12 +655,12 @@ where
     /// any [`CastKey`] previously minted for that slot with stale pointer
     /// metadata; using such a key with the `unsafe` typed accessors is then
     /// undefined behavior. This hazard is why `reattach` lives only on the
-    /// unsafe map and not (yet) on the checked
+    /// unsafe map and not on the checked
     /// [`CastMapG`](crate::cast_map::CastMapG).
     ///
     /// # Panics
-    /// Panics if `key` is not in a detached state, or if the map is full
-    /// (mirrors `slotmap`'s `reattach`).
+    /// Panics if `key` is not in a detached state (and, for dense storage, if
+    /// the map is full) — mirrors `slotmap`'s `reattach`.
     #[inline]
     pub fn reattach_by_inner_key(&mut self, key: M::Key, value: M::Value) {
         self.inner.reattach(key, value);
@@ -711,7 +713,8 @@ where
     /// is offered on the checked [`CastMapG`](crate::cast_map::CastMapG).
     ///
     /// # Panics
-    /// Panics if `key` is not detached or the map is full.
+    /// Panics if `key` is not detached (and, for dense storage, if the map is
+    /// full).
     #[inline]
     pub fn reattach(&mut self, key: CastKey<MTarget<M>, M::Key>, value: M::Value) {
         self.inner.reattach(key.inner_key(), value);

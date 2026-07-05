@@ -400,6 +400,8 @@ where
     }
 }
 
+// ─── Checked typed lookups (safe — type-id validated) ────────────────────────
+
 impl<M> CastMapG<M>
 where
     M: SlotMapTrait,
@@ -445,11 +447,6 @@ where
     /// Typed lookup by [`CastKey`]. Returns `None` if the slot is
     /// vacant, the key is stale, or the key's type does not match the value at
     /// that slot.
-    ///
-    /// The stored type id and the output reference are both read *before*
-    /// [`type_id_from_meta`] (whose vtable call is opaque to the optimizer),
-    /// and the returned reference is rebuilt from that already-loaded output
-    /// pointer — so the slot is not walked a second time across the call.
     #[inline]
     pub fn get<T: ?Sized + AnyHaver + Pointee>(
         &self,
