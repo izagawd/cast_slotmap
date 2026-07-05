@@ -268,9 +268,11 @@ fn drain_empties_and_yields() {
     assert!(map.is_empty());
 }
 
-// ─── Index (sized output map) ────────────────────────────────────────────────
-// `Index` requires the map's output type itself to be `AnyHaver`, which
-// `dyn Any` is not — so indexing is exercised on a sized-output map.
+// ─── typed get of a sized value inside a dyn Any map ─────────────────────────
+// (`Index`/`IndexMut` themselves require the map's *output* type to be
+// `AnyHaver`, which `dyn Any` is not — square-bracket indexing is therefore
+// exercised on the sized-output map in `index_mut_mutates` and
+// `index_panics_on_stale_key` instead.)
 
 #[test]
 fn index_reads() {
@@ -292,10 +294,12 @@ fn with_capacity_reserves() {
 
 #[test]
 fn clone_keys_stay_valid() {
-    // `CastBox<u32>` derefs to `u32`; the map is `Clone` iff `M` is, which a
-    // `CastBox<dyn Any>` map is not — exactly as `dyn Any` is not `Clone`.
-    // (This uses the unsafe map because `CastBox` itself is not `Clone`;
-    // cloning of checked maps is exercised where the value type allows it.)
+    // A map is `Clone` iff its stored pointer type is. `CastBox` is not
+    // `Clone` (its inner `Box<T: ?Sized>` isn't), so the checked box maps are
+    // never `Clone`; the unsafe map storing `Box<u32>` is, and demonstrates
+    // the shared semantics: checking is by slot version (plus, on the checked
+    // layer, stored type id) rather than per-map identity, so keys minted by
+    // the original remain valid on the clone.
     let mut map: UnsafeBoxCastMap<DefaultKey, u32> = UnsafeBoxCastMap::new();
     let key: CastKey<u32> = map.insert(Box::new(7u32));
 
@@ -339,7 +343,7 @@ fn insert_sized_with_key_threads_typed_key() {
 
 // ─── DynKey: round-trip + dyn dispatch through the key's metadata ────────────
 
-trait Pet: AnyHaver {
+trait Pet: AnyHaver + Any {
     fn speak(self: DynKey<'_, Self>, map: &AnyMap) -> String;
 }
 
@@ -516,6 +520,144 @@ fn unsafe_map_detach_reattach() {
     assert_eq!(unsafe { map.get(key) }.unwrap().name, "Zed");
 }
 
+// ─── insert_as: source-typed keys for already-unsized pointers ───────────────
+
+#[test]
+fn insert_as_keeps_source_typed_key() {
+    let mut map: AnyMap = AnyMap::new();
+    // `CastBox::new(Dog)` unsizes to `CastBox<dyn Pet>` first; `insert_as`
+    // then coerces that into the map's `CastBox<dyn Any>` (trait upcasting,
+    // possible because `Pet: Any`), while the returned key keeps the *source*
+    // `dyn Pet` typing — something `insert_sized` (Sized targets only) and
+    // `insert` (erased-target key) cannot express.
+    let pet_box: CastBox<dyn Pet> = CastBox::new(Dog { name: "As".into() });
+    let key: CastKey<dyn Pet> = map.insert_as(pet_box);
+
+    // The checked lookup validates the key's `dyn Pet` vtable (concrete type
+    // `Dog`) against the slot's stored type id, and virtual dispatch through
+    // the key's own metadata still works.
+    assert_eq!(key.as_dyn().speak(&map), "woof As");
+
+    // `remove` re-types the stored box back to the source type.
+    let removed: CastBox<dyn Pet> = map.remove(key).unwrap();
+    assert!(map.is_empty());
+    drop(removed);
+}
+
+#[test]
+fn insert_as_with_key_threads_backing_key() {
+    let mut map: AnyMap = AnyMap::new();
+    // Unlike `insert_sized_with_key`, the closure receives only the backing
+    // `slotmap` key: the pointer metadata does not exist until the value is
+    // constructed, so a typed `CastKey` cannot be minted up front.
+    let mut captured = None;
+    let key: CastKey<dyn Pet> = map.insert_as_with_key(|k| {
+        captured = Some(k);
+        let boxed: CastBox<dyn Pet> = CastBox::new(Cat { lives: 3 });
+        boxed
+    });
+    assert_eq!(captured.unwrap(), key.inner_key());
+    assert_eq!(key.as_dyn().speak(&map), "meow x3");
+}
+
+// ─── fallible insert closures leave the map untouched ────────────────────────
+
+#[test]
+fn try_insert_sized_error_is_noop() {
+    let mut map: AnyMap = AnyMap::new();
+    let res: Result<CastKey<Dog>, &str> =
+        map.try_insert_sized_with_key(|_k| Err::<CastBox<Dog>, _>("nope"));
+    assert_eq!(res.err(), Some("nope"));
+    assert!(map.is_empty());
+}
+
+#[test]
+fn try_insert_as_error_is_noop() {
+    let mut map: AnyMap = AnyMap::new();
+    let res: Result<CastKey<dyn Pet>, &str> =
+        map.try_insert_as_with_key(|_k| Err::<CastBox<dyn Pet>, _>("nope"));
+    assert_eq!(res.err(), Some("nope"));
+    assert!(map.is_empty());
+}
+
+// ─── cast_key_of: backing key → erased-target CastKey ────────────────────────
+
+#[test]
+fn cast_key_of_live_and_stale() {
+    let mut map: AnyMap = AnyMap::new();
+    let key: CastKey<Cat> = map.insert_sized(CastBox::new(Cat { lives: 5 }));
+
+    // Live slot: metadata is re-read from the stored value.
+    let erased = map.cast_key_of(key.inner_key()).unwrap();
+    assert_eq!(erased.inner_key(), key.inner_key());
+    assert_eq!(map.downcast_key::<Cat>(erased).unwrap(), key);
+
+    // Stale after remove: slotmap's version check rejects the backing key.
+    let _ = map.remove(key).unwrap();
+    assert!(map.cast_key_of(key.inner_key()).is_none());
+}
+
+// ─── get_disjoint_mut rejects a mistyped key ─────────────────────────────────
+
+#[test]
+fn get_disjoint_mut_wrong_type_is_rejected() {
+    let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
+    let k: CastKey<u32> = map.insert(CastBox::new(7u32));
+
+    // Forge a `Cat`-typed key naming the same live slot; the per-key type-id
+    // pre-check must refuse it before any mutable borrow is handed out.
+    let wrong: CastKey<Cat> = unsafe { CastKey::from_raw_parts(k.inner_key(), ()) };
+    assert!(map.get_disjoint_mut([wrong]).is_none());
+
+    // The honest key is unaffected.
+    let [v] = map.get_disjoint_mut([k]).unwrap();
+    *v += 1;
+    assert_eq!(*map.get(k).unwrap(), 8);
+}
+
+// ─── downcast_key on a version-stale key ─────────────────────────────────────
+
+#[test]
+fn downcast_key_stale_returns_none() {
+    let mut map: AnyMap = AnyMap::new();
+    let dog: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "St".into() }));
+    let dyn_key: CastKey<dyn Any> = dog.upcast();
+
+    let _ = map.remove(dog).unwrap();
+    // The slot version was bumped by the removal, so the erased key no longer
+    // resolves — even though a `Dog` used to live there.
+    assert!(map.downcast_key::<Dog>(dyn_key).is_none());
+}
+
+// ─── backing-key mutation helpers ────────────────────────────────────────────
+
+#[test]
+fn inner_key_mut_helpers_work() {
+    let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
+    let k: CastKey<u32> = map.insert(CastBox::new(10u32));
+
+    *map.get_by_inner_key_mut(k.inner_key()).unwrap() += 1;
+    for v in map.values_mut() {
+        *v += 1;
+    }
+    assert_eq!(*map.get(k).unwrap(), 12);
+
+    let removed: CastBox<u32> = map.remove_by_inner_key(k.inner_key()).unwrap();
+    assert_eq!(*removed, 12);
+    assert!(map.is_empty());
+}
+
+// ─── Index panics on an invalid key ──────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "invalid CastKey")]
+fn index_panics_on_stale_key() {
+    let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
+    let key: CastKey<u32> = map.insert(CastBox::new(1u32));
+    let _ = map.remove(key);
+    let _ = &map[key];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Dense variants: identical behaviour, backed by DenseSlotMap.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -610,6 +752,20 @@ mod dense {
         let removed: Box<Dog> = unsafe { map.remove(key).unwrap() };
         assert_eq!(removed.name, "U");
         assert!(map.is_empty());
+    }
+
+    #[test]
+    fn insert_as_roundtrip() {
+        use super::Pet;
+
+        let mut map: AnyMap = AnyMap::new();
+        let pet_box: CastBox<dyn Pet> = CastBox::new(Dog { name: "D".into() });
+        let key: CastKey<dyn Pet> = map.insert_as(pet_box);
+        assert_eq!(map.len(), 1);
+
+        let removed: CastBox<dyn Pet> = map.remove(key).unwrap();
+        assert!(map.is_empty());
+        drop(removed);
     }
 
     #[test]

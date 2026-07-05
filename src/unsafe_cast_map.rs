@@ -77,7 +77,10 @@ where
     M: SlotMapTrait + Clone,
 {
     /// Cloning preserves every slot's key and version, so keys valid on the
-    /// original stay valid on the clone.
+    /// original stay valid on the clone. (The checked
+    /// [`CastMapG`](crate::cast_map::CastMapG) layer behaves the same way:
+    /// its lookups are validated by slot version and stored type id rather
+    /// than any per-map identity, so cloning it carries no extra caveats.)
     #[inline]
     fn clone(&self) -> Self {
         Self {
