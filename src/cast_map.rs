@@ -409,19 +409,23 @@ where
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    /// Attempts to downcast a `CastKey<dyn Any>` to a concrete-typed key by
-    /// comparing the slot's stored type id with `TypeId::of::<Concrete>()`.
-    /// Returns `None` if the key is stale or the stored type differs.
+    /// Mints a concrete-typed key from a backing `slotmap` key by comparing
+    /// the slot's stored type id with `TypeId::of::<Concrete>()`. Returns
+    /// `None` if the key is stale or the stored type differs.
+    ///
+    /// Takes the backing key directly (get one from any `CastKey` via
+    /// [`inner_key`](CastKey::inner_key)): the check only needs the slot, so
+    /// no pointer metadata is required.
     #[inline]
     pub fn downcast_key<Concrete: 'static>(
         &self,
-        key: CastKey<dyn Any, M::Key>,
+        key: M::Key,
     ) -> Option<CastKey<Concrete, M::Key>> {
-        let stored = self.inner.inner.get(key.inner_key())?;
+        let stored = self.inner.inner.get(key)?;
         if stored.concrete_type_id() == TypeId::of::<Concrete>() {
             // SAFETY: `()` metadata is trivially valid for the sized
             // `Concrete`, which the slot was just proven to hold.
-            Some(unsafe { CastKey::from_raw_parts(key.inner_key(), ()) })
+            Some(unsafe { CastKey::from_raw_parts(key, ()) })
         } else {
             None
         }

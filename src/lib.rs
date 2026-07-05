@@ -9,8 +9,8 @@
 //! **storage** axis is basic vs. dense:
 //!
 //! - [`UnsafeCastMap`] — the low-level map over [`slotmap::SlotMap`]. Lookups
-//!   are typed via [`CastKey`], but `get` / `get_mut` / `remove` /
-//!   `downcast_key` are `unsafe`: they rebuild the typed reference from the
+//!   are typed via [`CastKey`], but `get` / `get_mut` / `remove`
+//!   are `unsafe`: they rebuild the typed reference from the
 //!   key's cached metadata without checking it still matches the value in the
 //!   slot, so using a key whose slot holds a different type is undefined
 //!   behavior.
@@ -90,7 +90,7 @@
 //!
 //! // Or insert erased and recover the typed key later.
 //! let dyn_key: CastKey<dyn Any> = map.insert(CastBox::new(Dog { name: "Ax".into() }));
-//! let typed: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
+//! let typed: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
 //! ```
 #![feature(ptr_metadata)]
 #![feature(coerce_unsized)]

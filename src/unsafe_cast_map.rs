@@ -10,8 +10,8 @@
 //! serves both [`slotmap::SlotMap`] and [`slotmap::DenseSlotMap`], exposed as the
 //! [`UnsafeCastMap`] and [`UnsafeDenseCastMap`] type aliases.
 //!
-//! Typed lookups go through [`CastKey`], but `get`, `get_mut`, `remove`, and
-//! `downcast_key` are **`unsafe`**: the caller must ensure the key's pointer
+//! Typed lookups go through [`CastKey`], but `get`, `get_mut`, and `remove`
+//! are **`unsafe`**: the caller must ensure the key's pointer
 //! metadata is valid for the data stored at that slot. For a safe wrapper that
 //! validates each lookup against the slot's stored concrete type id (see
 //! [`ConcreteTypeId`](crate::cast_box::ConcreteTypeId)), see
@@ -32,7 +32,6 @@
 //! because `slotmap`'s `get` borrows `&self` while `insert` borrows `&mut self`,
 //! so a live reference can never coexist with an insert.
 
-use std::any::{Any, TypeId};
 use std::collections::TryReserveError;
 use std::ops::{Deref, DerefMut};
 use std::ptr::Pointee;
@@ -249,28 +248,6 @@ where
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
 {
-    /// Attempts to downcast a `CastKey<dyn Any, ..>` to a concrete-typed key.
-    /// Returns `None` if the actual type doesn't match `Concrete`.
-    ///
-    /// # Safety
-    /// The key's metadata must be a valid vtable for `dyn Any` pointing at the
-    /// data stored in that slot.
-    #[inline]
-    pub unsafe fn downcast_key<Concrete: 'static>(
-        &self,
-        key: CastKey<dyn Any, M::Key>,
-    ) -> Option<CastKey<Concrete, M::Key>> {
-        let stored = self.inner.get(key.inner_key())?;
-        let base: &MTarget<M> = &**stored;
-        let data_as_any: &dyn Any =
-            &*std::ptr::from_raw_parts(base as *const MTarget<M> as *const (), key.metadata());
-        if data_as_any.type_id() == TypeId::of::<Concrete>() {
-            Some(CastKey::from_raw_parts(key.inner_key(), ()))
-        } else {
-            None
-        }
-    }
-
     // ── insert ───────────────────────────────────────────────────────────
 
     /// Inserts a smart pointer, returning a key with metadata.
@@ -720,9 +697,8 @@ where
     /// unsizes to it implicitly at the call site. `key` is the erased-target
     /// [`CastKey`] the map itself issues — `CastKey<MTarget<M>, M::Key>`, as
     /// returned by [`insert`](Self::insert), [`keys`](Self::keys), or
-    /// [`cast_key_of`](Self::cast_key_of); a concrete-typed key (e.g. from
-    /// [`downcast_key`](Self::downcast_key)) reaches it via
-    /// [`CastKey::upcast`](crate::cast_key::CastKey::upcast).
+    /// [`cast_key_of`](Self::cast_key_of); a concrete-typed key reaches it
+    /// via [`CastKey::upcast`](crate::cast_key::CastKey::upcast).
     ///
     /// Reattaching a value of a different concrete type than the slot last held
     /// leaves any retained [`CastKey`] with stale metadata; using such a key with

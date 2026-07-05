@@ -32,7 +32,7 @@ fn insert_then_downcast_typed_get() {
     // `insert` erases the concrete `Dog` and hands back the erased-target key;
     // `downcast_key` recovers a `Dog`-typed key.
     let dyn_key = map.insert(CastBox::new(Dog { name: "Rex".into() }));
-    let key = map.downcast_key::<Dog>(dyn_key).unwrap();
+    let key = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
     assert_eq!(map.get(key).unwrap().name, "Rex");
     assert_eq!(map.len(), 1);
     assert!(!map.is_empty());
@@ -49,7 +49,7 @@ fn typed_get_and_downcast_via_upcast() {
     assert_eq!(map.get(key).unwrap().name, "Fido");
 
     let dyn_key: CastKey<dyn Any> = key.upcast();
-    let recovered: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
+    let recovered: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
     assert_eq!(map.get(recovered).unwrap().name, "Fido");
 }
 
@@ -72,10 +72,10 @@ fn downcast_key_right_and_wrong_type() {
     let mut map: AnyMap = AnyMap::new();
     let dyn_key = map.insert(CastBox::new(Dog { name: "Spot".into() }));
 
-    let recovered: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
+    let recovered: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
     assert_eq!(map.get(recovered).unwrap().name, "Spot");
 
-    assert!(map.downcast_key::<Cat>(dyn_key).is_none());
+    assert!(map.downcast_key::<Cat>(dyn_key.inner_key()).is_none());
 }
 
 // ─── get_mut ─────────────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ fn downcast_key_right_and_wrong_type() {
 fn get_mut_mutates() {
     let mut map: AnyMap = AnyMap::new();
     let kx = map.insert(CastBox::new(Cat { lives: 9 }));
-    let key = map.downcast_key::<Cat>(kx).unwrap();
+    let key = map.downcast_key::<Cat>(kx.inner_key()).unwrap();
     map.get_mut(key).unwrap().lives -= 1;
     assert_eq!(map.get(key).unwrap().lives, 8);
 }
@@ -95,7 +95,7 @@ fn get_mut_mutates() {
 fn remove_returns_boxed_concrete() {
     let mut map: AnyMap = AnyMap::new();
     let kx = map.insert(CastBox::new(Dog { name: "Bud".into() }));
-    let key = map.downcast_key::<Dog>(kx).unwrap();
+    let key = map.downcast_key::<Dog>(kx.inner_key()).unwrap();
 
     let removed: CastBox<Dog> = map.remove(key).unwrap();
     assert_eq!(removed.name, "Bud");
@@ -127,10 +127,10 @@ fn remove_wrong_type_is_rejected() {
 fn stale_key_after_remove_reinsert() {
     let mut map: AnyMap = AnyMap::new();
     let k1x = map.insert(CastBox::new(Cat { lives: 1 }));
-    let k1 = map.downcast_key::<Cat>(k1x).unwrap();
+    let k1 = map.downcast_key::<Cat>(k1x.inner_key()).unwrap();
     let _ = map.remove(k1).unwrap();
     let k2x = map.insert(CastBox::new(Cat { lives: 2 }));
-    let k2 = map.downcast_key::<Cat>(k2x).unwrap();
+    let k2 = map.downcast_key::<Cat>(k2x.inner_key()).unwrap();
 
     // Old key does not alias the new value.
     assert!(map.get(k1).is_none());
@@ -143,7 +143,7 @@ fn stale_key_after_remove_reinsert() {
 fn clear_invalidates_keys() {
     let mut map: AnyMap = AnyMap::new();
     let kx = map.insert(CastBox::new(Dog { name: "Rex".into() }));
-    let key = map.downcast_key::<Dog>(kx).unwrap();
+    let key = map.downcast_key::<Dog>(kx.inner_key()).unwrap();
     map.clear();
     assert!(map.get(key).is_none());
     assert!(map.is_empty());
@@ -166,7 +166,7 @@ fn cross_map_wrong_type_is_rejected() {
     assert!(b.get(ka).is_none());
     assert!(!b.contains_key(ka));
     assert!(b.remove(ka).is_none());
-    assert!(b.downcast_key::<Dog>(ka.upcast()).is_none());
+    assert!(b.downcast_key::<Dog>(ka.inner_key()).is_none());
 
     // Original still works.
     assert_eq!(a.get(ka).unwrap().name, "A");
@@ -192,7 +192,7 @@ fn cross_map_same_type_resolves() {
 fn contains_key_tracks_liveness() {
     let mut map: AnyMap = AnyMap::new();
     let kx = map.insert(CastBox::new(Cat { lives: 9 }));
-    let key = map.downcast_key::<Cat>(kx).unwrap();
+    let key = map.downcast_key::<Cat>(kx.inner_key()).unwrap();
     assert!(map.contains_key(key));
     let _ = map.remove(key);
     assert!(!map.contains_key(key));
@@ -325,7 +325,7 @@ fn insert_with_key_threads_key() {
     });
     assert!(captured.is_some());
 
-    let key = map.downcast_key::<u32>(dyn_key).unwrap();
+    let key = map.downcast_key::<u32>(dyn_key.inner_key()).unwrap();
     assert_eq!(*map.get(key).unwrap(), 123);
 }
 
@@ -474,9 +474,7 @@ fn index_mut_mutates() {
 #[test]
 fn unsafe_map_typed_roundtrip() {
     let mut map: UnsafeBoxCastMap<DefaultKey, dyn Any> = UnsafeBoxCastMap::new();
-    let dyn_key = map.insert(Box::new(Dog { name: "U".into() }));
-    // SAFETY: just-inserted key; the stored value really is a `Dog`.
-    let key = unsafe { map.downcast_key::<Dog>(dyn_key) }.unwrap();
+    let key: CastKey<Dog> = map.insert_sized(Box::new(Dog { name: "U".into() }));
 
     // SAFETY: the slot still holds the `Dog` `key` was made for, so its metadata is valid.
     let d: &Dog = unsafe { map.get(key).unwrap() };
@@ -491,9 +489,7 @@ fn unsafe_map_typed_roundtrip() {
 #[test]
 fn unsafe_map_detach_reattach() {
     let mut map: UnsafeBoxCastMap<DefaultKey, dyn Any> = UnsafeBoxCastMap::new();
-    let dyn_key = map.insert(Box::new(Dog { name: "Rex".into() }));
-    // SAFETY: just-inserted key; the stored value really is a `Dog`.
-    let key = unsafe { map.downcast_key::<Dog>(dyn_key) }.unwrap();
+    let key: CastKey<Dog> = map.insert_sized(Box::new(Dog { name: "Rex".into() }));
 
     // SAFETY: the slot still holds the `Dog` `key` was made for, so its metadata is valid.
     let mut dog: Box<Dog> = unsafe { map.detach(key).unwrap() };
@@ -590,7 +586,7 @@ fn cast_key_of_live_and_stale() {
     // Live slot: metadata is re-read from the stored value.
     let erased = map.cast_key_of(key.inner_key()).unwrap();
     assert_eq!(erased.inner_key(), key.inner_key());
-    assert_eq!(map.downcast_key::<Cat>(erased).unwrap(), key);
+    assert_eq!(map.downcast_key::<Cat>(erased.inner_key()).unwrap(), key);
 
     // Stale after remove: slotmap's version check rejects the backing key.
     let _ = map.remove(key).unwrap();
@@ -626,7 +622,7 @@ fn downcast_key_stale_returns_none() {
     let _ = map.remove(dog).unwrap();
     // The slot version was bumped by the removal, so the erased key no longer
     // resolves — even though a `Dog` used to live there.
-    assert!(map.downcast_key::<Dog>(dyn_key).is_none());
+    assert!(map.downcast_key::<Dog>(dyn_key.inner_key()).is_none());
 }
 
 // ─── backing-key mutation helpers ────────────────────────────────────────────
@@ -678,7 +674,7 @@ mod dense {
     fn insert_then_downcast_typed_get() {
         let mut map: AnyMap = AnyMap::new();
         let dyn_key = map.insert(CastBox::new(Dog { name: "Rex".into() }));
-        let key = map.downcast_key::<Dog>(dyn_key).unwrap();
+        let key = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
         assert_eq!(map.get(key).unwrap().name, "Rex");
         assert_eq!(map.len(), 1);
     }
@@ -690,16 +686,16 @@ mod dense {
         assert_eq!(map.get(key).unwrap().name, "Fido");
 
         let dyn_key: CastKey<dyn Any> = key.upcast();
-        let recovered: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
+        let recovered: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
         assert_eq!(map.get(recovered).unwrap().name, "Fido");
-        assert!(map.downcast_key::<Cat>(dyn_key).is_none());
+        assert!(map.downcast_key::<Cat>(dyn_key.inner_key()).is_none());
     }
 
     #[test]
     fn get_mut_then_remove_invalidates() {
         let mut map: AnyMap = AnyMap::new();
         let kx = map.insert(CastBox::new(Cat { lives: 9 }));
-        let key = map.downcast_key::<Cat>(kx).unwrap();
+        let key = map.downcast_key::<Cat>(kx.inner_key()).unwrap();
         map.get_mut(key).unwrap().lives -= 1;
         assert_eq!(map.get(key).unwrap().lives, 8);
 
@@ -740,9 +736,7 @@ mod dense {
     #[test]
     fn unsafe_dense_map_roundtrip() {
         let mut map: UnsafeBoxDenseCastMap<DefaultKey, dyn Any> = UnsafeBoxDenseCastMap::new();
-        let dyn_key = map.insert(Box::new(Dog { name: "U".into() }));
-        // SAFETY: just-inserted key; the stored value really is a `Dog`.
-        let key = unsafe { map.downcast_key::<Dog>(dyn_key) }.unwrap();
+        let key: CastKey<Dog> = map.insert_sized(Box::new(Dog { name: "U".into() }));
 
         // SAFETY: the slot still holds the `Dog` `key` was made for, so its metadata is valid.
         let d: &Dog = unsafe { map.get(key).unwrap() };
