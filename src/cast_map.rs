@@ -284,7 +284,7 @@ where
 
     /// Inserts a concrete-typed smart pointer (coerced into `M::Value` on the
     /// way in), returning a [`CastKey`] typed to the concrete
-    /// `ConcretePtr::Target` rather than the erased output type.
+    /// `ConcretePtr::Target` rather than the map's output type.
     #[inline]
     pub fn insert_sized<ConcretePtr>(
         &mut self,

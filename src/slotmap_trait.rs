@@ -23,7 +23,7 @@ use slotmap::{DenseSlotMap, Key, SlotMap};
 
 /// The dereferenced output type of map `M`'s stored pointer
 /// (`<M::Value as Deref>::Target`). A convenience alias to keep the cast-map
-/// signatures readable now that the key/value types are associated.
+/// signatures readable.
 pub(crate) type MTarget<M> = <<M as SlotMapTrait>::Value as Deref>::Target;
 
 /// The subset of a `slotmap` map the cast layer relies on.

@@ -239,7 +239,7 @@ where
         self.inner.values_mut().map(|p| &mut **p)
     }
 
-    /// Mutable disjoint lookup by backing `slotmap` keys, yielding erased output
+    /// Mutable disjoint lookup by backing `slotmap` keys, yielding output-typed
     /// references. Returns `None` if any key is invalid or two keys alias the
     /// same slot.
     #[inline]
@@ -314,7 +314,7 @@ where
 
     /// Inserts a concrete-typed smart pointer (coerced into `M::Value` on the
     /// way in), returning a [`CastKey`] whose metadata is for
-    /// `ConcretePtr::Target` (not the erased output type).
+    /// `ConcretePtr::Target` (not the map's output type).
     #[inline]
     pub fn insert_sized<ConcretePtr>(
         &mut self,
