@@ -150,7 +150,7 @@ fn clear_invalidates_keys() {
 
 // ─── cross-map keys under the type-id model ──────────────────────────────────
 //
-// A foreign key is memory-safe, resolving if the slot it names is live and
+// A foreign key is memory-safe, resolving iff the slot it names is live and
 // holds a value of the key's type.
 
 #[test]

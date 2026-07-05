@@ -111,6 +111,39 @@ where
         Self { inner: M::empty() }
     }
 
+    // ── inner accessors ───────────────────────────────────────────────────
+
+    /// Consumes this map and returns the backing `slotmap` map.
+    ///
+    /// # Safety
+    /// Keys minted by this map cache pointer metadata for the values as
+    /// stored; anything done to the backing map directly (or to values moved
+    /// out of it) that changes which concrete type lives under a still-held
+    /// key makes that key's metadata stale, and using it with the typed
+    /// accessors is undefined behavior.
+    #[inline]
+    pub unsafe fn inner(self) -> M {
+        self.inner
+    }
+
+    /// Returns a shared reference to the backing `slotmap` map.
+    ///
+    /// # Safety
+    /// See [`inner`](Self::inner).
+    #[inline]
+    pub unsafe fn inner_ref(&self) -> &M {
+        &self.inner
+    }
+
+    /// Returns a mutable reference to the backing `slotmap` map.
+    ///
+    /// # Safety
+    /// See [`inner`](Self::inner).
+    #[inline]
+    pub unsafe fn inner_mut(&mut self) -> &mut M {
+        &mut self.inner
+    }
+
     /// Creates a new map with the given pre-allocated capacity.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
