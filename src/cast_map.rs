@@ -16,8 +16,8 @@
 //!
 //! This safety hinges on a stored type id, so the checked lookups require
 //! `M::Value: ConcreteTypeId` — satisfied by [`CastBox`] (e.g. [`BoxCastMap`])
-//! or any custom box that implements [`ConcreteTypeId`]. A plain `Box` won't
-//! do; that is what [`UnsafeCastMapG`] is for.
+//! or any custom box that implements [`ConcreteTypeId`]. A plain `Box` has no
+//! type id, so it only works with [`UnsafeCastMapG`].
 //!
 //! On the key side, lookups require `T: AnyHaver`: sized types always qualify;
 //! trait objects qualify when the trait declares `AnyHaver` as a supertrait.

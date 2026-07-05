@@ -20,8 +20,10 @@
 //!   [`KeyData::as_ffi`], relying only on its documented guarantee:
 //!   round-tripping through [`KeyData::from_ffi`]. The smuggled address is
 //!   **never dereferenced** on this path.
-//! - **Does not fit:** the address is a real pointer to the borrowed
-//!   `CastKey`, which the `'a` borrow keeps alive.
+//! - **Does not fit:** the address is a real pointer to the borrowed key's
+//!   backing `K` field, which the `'a` borrow keeps alive. Only `K` is read
+//!   back (its type is the same for every `T`); the metadata always travels
+//!   in the fat pointer itself, where unsizing coercions keep it correct.
 //!
 //! Nonzero: `NonNull` needs a nonzero address, and on the packed path that is
 //! **checked at runtime** rather than assumed — construction panics if the
@@ -60,8 +62,9 @@ const fn fits_inline() -> bool {
 /// dk.tick(&mut world); // virtual call through the key's metadata
 /// ```
 pub struct DynKey<'a, T: ?Sized, K: Key = DefaultKey> {
-    /// Address = packed `KeyData` (or a pointer to the borrowed `CastKey` when
-    /// packing does not fit); metadata = the `CastKey`'s pointer metadata.
+    /// Address = packed `KeyData` (or a pointer to the borrowed key's `K`
+    /// field when packing does not fit); metadata = the `CastKey`'s pointer
+    /// metadata.
     ptr: NonNull<T>,
     _borrow: PhantomData<&'a K>,
 }
@@ -124,9 +127,12 @@ where
             NonNull::without_provenance(packed)
         } else {
             // The key does not fit in a pointer on this target: point at the
-            // borrowed `CastKey` itself. Valid for 'a; provenance is
+            // borrowed key's backing `K` field. `K` is the same type for
+            // every `T`, so `key()` can read it back even after an unsizing
+            // coercion changes `T` (reading the whole `CastKey<T, K>` could
+            // not: its layout differs per `T`). Valid for 'a; provenance is
             // preserved through from/to_raw_parts.
-            NonNull::from(key).cast()
+            NonNull::from(&key.key).cast()
         };
         Self {
             ptr: NonNull::from_raw_parts(thin, key.metadata()),
@@ -147,9 +153,14 @@ where
             // for the metadata.
             unsafe { CastKey::from_raw_parts(key, metadata) }
         } else {
-            // SAFETY: on this path `thin` points at the `CastKey` borrowed by
-            // `new`, still alive for 'a; `CastKey` is `Copy`.
-            unsafe { thin.cast::<CastKey<T, K>>().read() }
+            // SAFETY: on this path `thin` points at the `K` field of the
+            // `CastKey` borrowed by `new`, still alive for 'a; `K` is `Copy`
+            // and its type does not depend on `T`. The metadata comes from
+            // the fat pointer, which unsizing coercions keep correct for the
+            // current `T`.
+            let k = unsafe { thin.cast::<K>().read() };
+            // SAFETY: `k` and `metadata` describe the same borrowed key.
+            unsafe { CastKey::from_raw_parts(k, metadata) }
         }
     }
 }

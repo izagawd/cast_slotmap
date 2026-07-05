@@ -20,11 +20,11 @@
 //! ## Relationship to `slotmap`
 //! Every method forwards to the backing `slotmap` map through the
 //! [`SlotMapTrait`](crate::slotmap_trait::SlotMapTrait) trait. `detach` /
-//! `reattach` are exposed here
-//! (both `slotmap` maps support them) but **not** on the checked
-//! [`CastMapG`](crate::cast_map::CastMapG): reattaching a different concrete type
-//! under an existing key would leave that key's cached pointer metadata stale,
-//! so it is left to the caller's `unsafe` discipline.
+//! `reattach` are exposed here (both `slotmap` maps support them) but **not**
+//! on the checked [`CastMapG`](crate::cast_map::CastMapG): reattaching a
+//! different concrete type under an existing key leaves that key's cached
+//! pointer metadata stale — a hazard this map can carry, since only its
+//! `unsafe` typed accessors could ever act on that stale metadata.
 
 use std::collections::TryReserveError;
 use std::ops::{Deref, DerefMut};

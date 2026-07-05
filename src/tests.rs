@@ -390,6 +390,19 @@ fn dyn_key_round_trips() {
 }
 
 #[test]
+fn dyn_key_coerced_round_trips() {
+    let mut map: AnyMap = AnyMap::new();
+    let dog: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Co".into() }));
+
+    // Safe unsizing coercion of the DynKey itself (not of the CastKey);
+    // `key()` must still recover a correct `CastKey<dyn Pet>` afterwards.
+    let dk: DynKey<'_, dyn Pet> = dog.as_dyn();
+    let back: CastKey<dyn Pet> = dk.key();
+    assert_eq!(back, dog.upcast::<dyn Pet>());
+    assert_eq!(back.as_dyn().speak(&map), "woof Co");
+}
+
+#[test]
 fn dyn_key_dispatches_virtually() {
     let mut map: AnyMap = AnyMap::new();
     let dog: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Rex".into() }));
