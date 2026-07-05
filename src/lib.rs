@@ -38,6 +38,16 @@
 //! `BoxCastMap<DefaultKey, dyn Any>`. The raw maps have [`UnsafeBoxCastMap`] /
 //! [`UnsafeBoxDenseCastMap`], storing plain `Box`.
 //!
+//! # `AnyHaver` and key types
+//! Checked lookups require `T: AnyHaver`, an **`unsafe` trait** that recovers a
+//! concrete [`TypeId`](std::any::TypeId) from pointer metadata alone. All
+//! `'static` sized types get it via a blanket impl; trait-object keys get it by
+//! declaring it as a supertrait (`trait Foo: AnyHaver`), which puts the lookup
+//! in `dyn Foo`'s vtable. `dyn Any` has no such supertrait, so
+//! `map.get(dyn_any_key)` is a **compile error** — recover a typed key with
+//! [`downcast_key`](CastMapG::downcast_key) or read type-erased through
+//! [`get_by_inner_key`](CastMapG::get_by_inner_key) instead.
+//!
 //! # Dyn-dispatchable keys
 //! [`DynKey`] (via [`CastKey::as_dyn`]) reshapes a borrowed key into a valid
 //! trait-object method receiver, so traits can declare

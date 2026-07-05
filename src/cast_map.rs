@@ -22,6 +22,12 @@
 //! or any custom box that implements [`ConcreteTypeId`]. A plain `Box` won't
 //! do; that is what [`UnsafeCastMapG`] is for.
 //!
+//! On the key side, lookups require `T: AnyHaver`: sized types always qualify;
+//! trait objects qualify when the trait declares `AnyHaver` as a supertrait.
+//! `dyn Any` does not, so `get::<dyn Any>` is a compile error — use
+//! [`downcast_key`](CastMapG::downcast_key) or
+//! [`get_by_inner_key`](CastMapG::get_by_inner_key) for erased access.
+//!
 //! [`CastMapG`] is generic over the backing `slotmap` map `M`
 //! ([`slotmap::SlotMap`] or [`slotmap::DenseSlotMap`]); the backing key and
 //! stored pointer types are read off `M` as `M::Key` and `M::Value`. The
