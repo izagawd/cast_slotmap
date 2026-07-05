@@ -1,8 +1,11 @@
 //! [`DynKey`]: a [`CastKey`](crate::cast_key::CastKey) borrowed into a shape
 //! that can be a **method receiver on trait objects**.
 //!
-//! `CastKey<dyn Trait>` itself is `Sized` (the vtable is an ordinary field),
-//! so `&CastKey<dyn Trait>` is a thin pointer and cannot dynamically dispatch.
+//! A dyn-dispatch receiver must be exactly the size and shape of a pointer,
+//! and `CastKey` cannot guarantee that: *pointer* size varies by target
+//! (32- vs 64-bit) while the key is a fixed 8 bytes — and `slotmap` plans to
+//! let users pick the size of their keys — so the key cannot be relied on to
+//! fit in, or match, a pointer.
 //! `DynKey` re-expresses the same information as a single fat `NonNull<T>`:
 //! the *metadata* half carries the key's pointer metadata (the vtable for
 //! `dyn` targets), and the *address* half smuggles the backing `slotmap` key.
@@ -10,15 +13,22 @@
 //! declare methods as `fn m(self: DynKey<Self>, ...)` and be called through
 //! `DynKey<dyn Trait>`.
 //!
-//! The address is either the key's packed [`KeyData`] (64-bit targets: it
-//! always fits, see below) or, when it does not fit (32-bit targets), a real
-//! pointer to the borrowed `CastKey` — which the `'a` borrow keeps alive. The
-//! smuggled address is **never dereferenced** in the packed case.
+//! Which of the two representations the address holds is decided by a
+//! compile-time check of the actual types involved
+//! (`size_of::<KeyData>() <= size_of::<usize>()`):
+//! - **Fits:** the address is the key's packed [`KeyData`]
+//!   ([`KeyData::as_ffi`], whose only documented guarantee — round-tripping
+//!   through [`KeyData::from_ffi`] — is the only property relied on). The
+//!   smuggled address is **never dereferenced** on this path.
+//! - **Does not fit:** the address is a real pointer to the borrowed
+//!   `CastKey`, which the `'a` borrow keeps alive.
 //!
-//! Nonzero guarantee: `KeyData::as_ffi()` places the slot version — a
-//! `NonZeroU32` in `slotmap` — in the high 32 bits, so the packed value is
-//! always ≥ `1 << 32`. `NonNull` is therefore sound for every key, and
-//! `Option<DynKey>` stays pointer-sized.
+//! Nonzero: `NonNull` needs a nonzero address, and on the packed path that is
+//! **checked at runtime** rather than assumed — construction panics if the
+//! packed value were ever `0`. In practice it never is (every `KeyData`
+//! contains a `NonZeroU32` version), the check folds away under optimization,
+//! and `Option<DynKey>` stays pointer-sized; but correctness does not depend
+//! on `as_ffi`'s bit layout.
 
 use std::marker::{PhantomData, Unsize};
 use std::num::NonZeroUsize;
@@ -29,10 +39,11 @@ use slotmap::{DefaultKey, Key, KeyData};
 
 use crate::cast_key::CastKey;
 
-/// Does a packed [`KeyData`] (a `u64`) fit in a pointer address?
+/// Does a packed [`KeyData`] fit in a pointer address? Decided from the types
+/// themselves, per target.
 #[inline]
 const fn fits_inline() -> bool {
-    size_of::<u64>() <= size_of::<usize>()
+    size_of::<KeyData>() <= size_of::<usize>()
 }
 
 /// A borrowed, dyn-dispatchable form of a [`CastKey`].
@@ -89,12 +100,18 @@ where
     pub fn new(key: &'a CastKey<T, K>) -> Self {
         let thin: NonNull<()> = if const { fits_inline() } {
             let packed = key.inner_key().data().as_ffi() as usize;
-            // `as_ffi` puts the NonZeroU32 version in the high 32 bits, so
-            // `packed >= 1 << 32`; the unwrap can never fire and folds away.
-            NonNull::without_provenance(NonZeroUsize::new(packed).unwrap())
+            // Nonzero is verified here, not assumed from `as_ffi`'s layout:
+            // if a future `slotmap` ever packed a key to `0`, this panics
+            // instead of constructing an invalid `NonNull`. Today every
+            // `KeyData` holds a `NonZeroU32` version, so the check always
+            // passes and folds away.
+            let packed = NonZeroUsize::new(packed)
+                .expect("slotmap KeyData::as_ffi produced 0, which DynKey cannot pack");
+            NonNull::without_provenance(packed)
         } else {
-            // Does not fit (32-bit target): point at the borrowed key itself.
-            // Valid for 'a; provenance is preserved through from/to_raw_parts.
+            // The key does not fit in a pointer on this target: point at the
+            // borrowed `CastKey` itself. Valid for 'a; provenance is
+            // preserved through from/to_raw_parts.
             NonNull::from(key).cast()
         };
         Self {
@@ -108,6 +125,8 @@ where
     pub fn key(self) -> CastKey<T, K> {
         let (thin, metadata) = self.ptr.to_raw_parts();
         if const { fits_inline() } {
+            // `from_ffi(as_ffi(k)) == k` is the documented round-trip
+            // guarantee; nothing about the value's layout is relied on.
             let key = K::from(KeyData::from_ffi(thin.addr().get() as u64));
             // SAFETY: `key`/`metadata` round-trip the exact values of the
             // `CastKey` given to `new`, whose construction already vouched

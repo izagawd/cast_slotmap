@@ -87,8 +87,12 @@ is `unsafe`: returning a wrong `TypeId` would make the checked lookups unsound.
 
 ## `DynKey`: dyn-dispatchable keys
 
-`CastKey<dyn Trait>` is `Sized`, so `&CastKey<dyn Trait>` can't dispatch. 
-`CastKey::as_dyn()` borrows the key as a `DynKey<'_, T>` — a single fat
+A dyn-dispatch receiver must be exactly the size and shape of a pointer, and
+`CastKey` cannot guarantee that: *pointer* size varies by target (32- vs
+64-bit) while the key is a fixed 8 bytes — and `slotmap` plans to let users
+pick the size of their keys — so the key cannot be relied on to fit in, or
+match, a pointer. `CastKey::as_dyn` instead
+borrows the key as a `DynKey<'_, T>` — a single fat
 `NonNull` whose metadata half is the key's vtable and whose address half packs
 the backing `slotmap` key (`KeyData::as_ffi`; always nonzero since the version
 is `NonZeroU32`, so `Option<DynKey>` stays pointer-sized; on 32-bit targets it
@@ -106,46 +110,6 @@ key.as_dyn().tick(&mut world);   // virtual call through the key's own vtable
 
 Inside the method, `self.key()` returns the `CastKey<Self>` to resolve against
 the map. The dispatch itself never touches the map.
-
-## Design: this is a `SlotMap`, not a stable-reference arena
-
-`slotmap::SlotMap::insert` takes `&mut self` (and so does `DenseSlotMap`), so
-this crate **mirrors that mutability model** rather than offering a
-`&self`-insert, stable-reference API:
-
-- Every mutating method — `insert*`, `remove`, `reserve`, `clear`, `retain`,
-  `drain` — takes `&mut self`.
-- Each public method **delegates to the underlying `slotmap::SlotMap`** method.
-- Because `get` borrows `&self` while `insert` borrows `&mut self`, references
-  and inserts can never coexist. Consequently:
-  - `iter` is a plain **safe** shared iterator (there is no `unsafe_iter`),
-  - `Clone` is a normal forward — and since checking is by version + type id,
-    keys from the original remain valid on the clone,
-  - there is **no** `get_slot`, `get_by_index_only`, or `reset` — `slotmap`
-    exposes no such operations, and faking them with `unsafe` would mean
-    reaching past its public API. `clear` is the native way to invalidate every
-    outstanding key.
-
-## Key-level API
-
-The key-level API is independent of how the underlying map mutates: `insert` /
-`insert_with_key` / `try_insert_with_key`, the typed-key `insert_sized` family,
-the source-typed `insert_as` family,
-`downcast_key`, `CastKey::upcast`, `CastKey::as_dyn`, typed `get<T>` /
-`get_unchecked<T>` / `remove<T>` (via `RetypePtr`), `cast_key_of`,
-`get_by_inner_key`(`_mut`), `remove_by_inner_key`, `keys`,
-`values`(`_mut`), `iter`(`_mut`), `drain`, `retain`, `Index`/`IndexMut`, and
-`IntoIterator` (owned / `&` / `&mut`).
-
-All four maps also offer disjoint mutable access — `get_disjoint_mut` (typed) and
-`get_disjoint_mut_by_inner_key`, each with an `unchecked` companion.
-
-The only dependencies are
-[`slotmap`](https://crates.io/crates/slotmap) and
-[`stable_deref_trait`](https://crates.io/crates/stable_deref_trait) — the latter
-supplies the `StableDeref` bound (the same trait `elsa`, `owning_ref`, etc. use),
-so any `StableDeref` smart pointer works as the stored `Ptr`, not just the std
-ones (checked maps additionally need it to implement `ConcreteTypeId`).
 
 ## License
 
