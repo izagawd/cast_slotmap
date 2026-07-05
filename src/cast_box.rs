@@ -86,6 +86,15 @@ unsafe impl<'a, O: ?Sized> RetypePtr<'a> for CastBox<O> {
 /// for it (alongside `Deref` + [`StableDeref`], which any stored pointer
 /// needs). Nothing here assumes `CastBox` specifically.
 ///
+/// Why store the id instead of asking the value? Not every store answers
+/// correctly: `Box<dyn Any>` could, but for a `Box<dyn Foo>` where `Foo` is
+/// not an `Any` subtrait, `type_id` resolves statically to
+/// `TypeId::of::<dyn Foo>()` — not the underlying type's — and
+/// special-casing the stores that answer correctly would make the checked
+/// maps' behavior depend confusingly on the store's type. An
+/// explicitly stored id works uniformly — and is also a performance win: a
+/// plain field read per lookup instead of a virtual call to ask the value.
+///
 /// # Safety
 /// The checked maps rebuild typed references based on this value:
 /// `concrete_type_id` must return the [`TypeId`] of the concrete type of the

@@ -13,19 +13,23 @@
 //! declare methods as `fn m(self: DynKey<Self>, ...)` and be called through
 //! `DynKey<dyn Trait>`.
 //!
-//! Which of the two representations the address holds is decided by a
-//! compile-time check of the actual types involved
-//! (`size_of::<KeyData>() <= size_of::<usize>()`):
-//! - **Fits:** the address is the key's packed [`KeyData`] via
-//!   [`KeyData::as_ffi`], relying only on its documented guarantee:
-//!   round-tripping through [`KeyData::from_ffi`]. The smuggled address is
-//!   **never dereferenced** on this path.
-//! - **Does not fit:** the address is a real pointer to the borrowed key's
+//! Which representation the address holds is decided by compile-time checks
+//! of the actual types involved, in three tiers:
+//! - **`size_of::<KeyData>() == size_of::<usize>()`:** the address is the
+//!   key's packed [`KeyData`] via [`KeyData::as_ffi`], relying only on its
+//!   documented guarantee — round-tripping through [`KeyData::from_ffi`] —
+//!   never the key's byte layout, which could contain padding.
+//! - **`size_of::<KeyData>() < size_of::<usize>()`** (e.g. a 128-bit
+//!   target): same packing; the `as_ffi` value zero-extends into the wider
+//!   address.
+//! - **Otherwise:** the address is a real pointer to the borrowed key's
 //!   backing `K` field, which the `'a` borrow keeps alive. Only `K` is read
 //!   back (its type is the same for every `T`); the metadata always travels
 //!   in the fat pointer itself, where unsizing coercions keep it correct.
 //!
-//! Nonzero: `NonNull` needs a nonzero address, and on the packed path that is
+//! The smuggled address is **never dereferenced** on the first two paths.
+//!
+//! Nonzero: `NonNull` needs a nonzero address, and on the packed paths that is
 //! **checked at runtime** rather than assumed — construction panics if the
 //! packed value were ever `0`. In practice it never is (every `KeyData`
 //! contains a `NonZeroU32` version), the check folds away under optimization,
@@ -41,11 +45,18 @@ use slotmap::{DefaultKey, Key, KeyData};
 
 use crate::cast_key::CastKey;
 
-/// Does a packed [`KeyData`] fit in a pointer address? Decided from the types
-/// themselves, per target.
+/// Is a packed [`KeyData`] exactly the size of a pointer address? Decided
+/// from the types themselves, per target.
 #[inline]
-const fn fits_inline() -> bool {
-    size_of::<KeyData>() <= size_of::<usize>()
+const fn equals_ptr() -> bool {
+    size_of::<KeyData>() == size_of::<usize>()
+}
+
+/// Is a packed [`KeyData`] smaller than a pointer address (e.g. a 128-bit
+/// target)? Decided from the types themselves, per target.
+#[inline]
+const fn smaller_than_ptr() -> bool {
+    size_of::<KeyData>() < size_of::<usize>()
 }
 
 /// A borrowed, dyn-dispatchable form of a [`CastKey`].
@@ -119,7 +130,14 @@ where
     /// Borrows a [`CastKey`] into its dyn-dispatchable form.
     #[inline]
     pub fn new(key: &'a CastKey<T, K>) -> Self {
-        let thin: NonNull<()> = if const { fits_inline() } {
+        let thin: NonNull<()> = if const { equals_ptr() } {
+            let packed = key.inner_key().data().as_ffi() as usize;
+            // Runtime-verified nonzero; see the module docs.
+            let packed = NonZeroUsize::new(packed)
+                .expect("slotmap KeyData::as_ffi produced 0, which DynKey cannot pack");
+            NonNull::without_provenance(packed)
+        } else if const { smaller_than_ptr() } {
+            // Zero-extends into the wider address.
             let packed = key.inner_key().data().as_ffi() as usize;
             // Runtime-verified nonzero; see the module docs.
             let packed = NonZeroUsize::new(packed)
@@ -144,7 +162,7 @@ where
     #[inline]
     pub fn key(self) -> CastKey<T, K> {
         let (thin, metadata) = self.ptr.to_raw_parts();
-        if const { fits_inline() } {
+        if const { equals_ptr() || smaller_than_ptr() } {
             // `from_ffi(as_ffi(k)) == k` is the documented round-trip
             // guarantee; nothing about the value's layout is relied on.
             let key = K::from(KeyData::from_ffi(thin.addr().get() as u64));

@@ -16,8 +16,12 @@
 //!
 //! This safety hinges on a stored type id, so the checked lookups require
 //! `M::Value: ConcreteTypeId` — satisfied by [`CastBox`] (e.g. [`BoxCastMap`])
-//! or any custom box that implements [`ConcreteTypeId`]. A plain `Box` has no
-//! type id, so it only works with [`UnsafeCastMapG`].
+//! or any custom box that implements [`ConcreteTypeId`]. A plain `Box` does
+//! not qualify: `Box<dyn Any>` could ask its value, but for a `Box<dyn Foo>`
+//! where `Foo` is not an `Any` subtrait, `type_id` resolves statically to
+//! `TypeId::of::<dyn Foo>()` — not the underlying type's — so the checked
+//! map requires an explicitly stored id rather than special-casing some
+//! stores. Plain `Box` works with [`UnsafeCastMapG`].
 //!
 //! On the key side, lookups require `T: AnyHaver`: sized types always qualify;
 //! trait objects qualify when the trait declares `AnyHaver` as a supertrait.
