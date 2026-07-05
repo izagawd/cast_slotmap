@@ -337,7 +337,7 @@ where
         value: SourcePtr,
     ) -> CastKey<SourcePtr::Target, M::Key>
     where
-        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
         self.inner.insert_as(value)
@@ -351,7 +351,7 @@ where
         func: impl FnOnce(M::Key) -> SourcePtr,
     ) -> CastKey<SourcePtr::Target, M::Key>
     where
-        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
         self.inner.insert_as_with_key(func)
@@ -364,7 +364,7 @@ where
         func: impl FnOnce(M::Key) -> Result<SourcePtr, E>,
     ) -> Result<CastKey<SourcePtr::Target, M::Key>, E>
     where
-        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
         self.inner.try_insert_as_with_key(func)

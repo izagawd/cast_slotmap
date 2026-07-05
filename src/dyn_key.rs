@@ -27,8 +27,8 @@
 //! **checked at runtime** rather than assumed — construction panics if the
 //! packed value were ever `0`. In practice it never is (every `KeyData`
 //! contains a `NonZeroU32` version), the check folds away under optimization,
-//! and `Option<DynKey>` stays pointer-sized; but correctness does not depend
-//! on `as_ffi`'s bit layout.
+//! and the `NonNull` niche means `Option<DynKey>` costs no extra space; but
+//! correctness does not depend on `as_ffi`'s bit layout.
 
 use std::marker::{PhantomData, Unsize};
 use std::num::NonZeroUsize;
@@ -73,6 +73,24 @@ impl<'a, T: ?Sized, K: Key> Clone for DynKey<'a, T, K> {
     }
 }
 impl<'a, T: ?Sized, K: Key> Copy for DynKey<'a, T, K> {}
+
+// SAFETY: a `DynKey` is semantically a `&'a CastKey<T, K>` (on the borrow
+// path) or a by-value copy of the key's bits (on the packed path); it is
+// `Copy`, never hands out `&mut`, and never dereferences `ptr` as a `T`.
+// Sending or sharing it across threads therefore only permits *reading* the
+// borrowed `CastKey`, so both impls require exactly `CastKey<T, K>: Sync`.
+unsafe impl<'a, T: ?Sized + Pointee, K: Key> Send for DynKey<'a, T, K>
+where
+    <T as Pointee>::Metadata: Copy,
+    CastKey<T, K>: Sync,
+{
+}
+unsafe impl<'a, T: ?Sized + Pointee, K: Key> Sync for DynKey<'a, T, K>
+where
+    <T as Pointee>::Metadata: Copy,
+    CastKey<T, K>: Sync,
+{
+}
 
 // Dyn-dispatch machinery: `DynKey` is a single (fat) pointer plus 1-ZSTs, the
 // exact shape `DispatchFromDyn` requires of a receiver.

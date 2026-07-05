@@ -85,12 +85,21 @@ unsafe impl<'a, O: ?Sized> RetypePtr<'a> for CastBox<O> {
 /// use your own owning box with the checked maps, implement `ConcreteTypeId`
 /// for it (alongside `Deref` + [`StableDeref`], which any stored pointer
 /// needs). Nothing here assumes `CastBox` specifically.
-pub trait ConcreteTypeId {
+///
+/// # Safety
+/// The checked maps rebuild typed references based on this value:
+/// `concrete_type_id` must return the [`TypeId`] of the concrete type of the
+/// value this box currently owns. A wrong answer lets a safe lookup
+/// reinterpret the value as another type, which is undefined behavior.
+pub unsafe trait ConcreteTypeId {
     /// The concrete type id of the value this box owns.
     fn concrete_type_id(&self) -> TypeId;
 }
 
-impl<T: ?Sized> ConcreteTypeId for CastBox<T> {
+// SAFETY: `type_id` is captured from the concrete `T` in `CastBox::new` and
+// only ever carried across unsizing coercions / `retype` (whose own contract
+// requires the value to actually be the target type).
+unsafe impl<T: ?Sized> ConcreteTypeId for CastBox<T> {
     #[inline]
     fn concrete_type_id(&self) -> TypeId {
         self.type_id

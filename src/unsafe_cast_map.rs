@@ -265,10 +265,7 @@ where
         let data_as_any: &dyn Any =
             &*std::ptr::from_raw_parts(base as *const MTarget<M> as *const (), key.metadata());
         if data_as_any.type_id() == TypeId::of::<Concrete>() {
-            Some(CastKey::from_raw_parts(
-                key.key,
-               (),
-            ))
+            Some(CastKey::from_raw_parts(key.inner_key(), ()))
         } else {
             None
         }
@@ -378,7 +375,7 @@ where
         value: SourcePtr,
     ) -> CastKey<SourcePtr::Target, M::Key>
     where
-        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
         self.insert_as_with_key(|_| value)
@@ -388,13 +385,18 @@ where
     /// the source `SourcePtr::Target`. The closure receives the backing key
     /// (not a typed [`CastKey`] — the metadata does not exist until the value
     /// does).
+    ///
+    /// `SourcePtr: StableDeref` (not just `Deref`) because the key's metadata
+    /// is read through the source pointer's deref *before* the coercion: the
+    /// deref must describe the same, stable allocation the map ends up
+    /// owning.
     #[inline]
     pub fn insert_as_with_key<SourcePtr>(
         &mut self,
         func: impl FnOnce(M::Key) -> SourcePtr,
     ) -> CastKey<SourcePtr::Target, M::Key>
     where
-        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
         self.try_insert_as_with_key(|key| Ok::<_, ()>(func(key)))
@@ -409,7 +411,7 @@ where
         func: impl FnOnce(M::Key) -> Result<SourcePtr, E>,
     ) -> Result<CastKey<SourcePtr::Target, M::Key>, E>
     where
-        SourcePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
         let mut saved_metadata: Option<<SourcePtr::Target as Pointee>::Metadata> = None;
