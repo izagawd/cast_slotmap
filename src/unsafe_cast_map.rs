@@ -19,19 +19,12 @@
 //!
 //! ## Relationship to `slotmap`
 //! Every method forwards to the backing `slotmap` map through the
-//! [`SlotMapTrait`](crate::slotmap_trait::SlotMapTrait) trait. Mutating methods
-//! (`insert*`, `remove`, `reserve`, `clear`, `retain`, `drain`) take `&mut self`
-//! because that is `slotmap`'s signature. `detach` / `reattach` are exposed here
+//! [`SlotMapTrait`](crate::slotmap_trait::SlotMapTrait) trait. `detach` /
+//! `reattach` are exposed here
 //! (both `slotmap` maps support them) but **not** on the checked
 //! [`CastMapG`](crate::cast_map::CastMapG): reattaching a different concrete type
 //! under an existing key would leave that key's cached pointer metadata stale,
-//! so it is left to the caller's `unsafe` discipline. There is
-//! intentionally **no** `get_slot`, `get_by_index_only`, or `reset`
-//! (`slotmap` exposes no such operations), and no `unsafe_clone` /
-//! `clone_mut` family (plain `Clone` suffices under the `&mut self` mutation
-//! model). `iter` is a plain safe shared iterator
-//! because `slotmap`'s `get` borrows `&self` while `insert` borrows `&mut self`,
-//! so a live reference can never coexist with an insert.
+//! so it is left to the caller's `unsafe` discipline.
 
 use std::collections::TryReserveError;
 use std::ops::{Deref, DerefMut};
@@ -79,8 +72,8 @@ where
     /// Cloning preserves every slot's key and version, so keys valid on the
     /// original stay valid on the clone. (The checked
     /// [`CastMapG`](crate::cast_map::CastMapG) layer behaves the same way:
-    /// its lookups are validated by slot version and stored type id rather
-    /// than any per-map identity, so cloning it carries no extra caveats.)
+    /// its lookups are validated by slot version and stored type id, so
+    /// cloning it carries no extra caveats.)
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -251,7 +244,7 @@ where
 {
     // ── insert ───────────────────────────────────────────────────────────
 
-    /// Inserts a smart pointer, returning the erased-target [`CastKey`]
+    /// Inserts a smart pointer, returning the output-typed [`CastKey`]
     /// (`CastKey<MTarget<M>, M::Key>`, metadata read from the stored value).
     #[inline]
     pub fn insert(&mut self, value: M::Value) -> CastKey<MTarget<M>, M::Key> {
@@ -700,7 +693,7 @@ where
     /// Reattaches `value` at a slot freed with [`detach`](Self::detach), reusing
     /// `key`. `value` is the pointer the backing `slotmap` stores directly
     /// (`M::Value`, e.g. `Box<dyn Any>`); a concrete pointer like `Box<Dog>`
-    /// unsizes to it implicitly at the call site. `key` is the erased-target
+    /// unsizes to it implicitly at the call site. `key` is the output-typed
     /// [`CastKey`] the map itself issues — `CastKey<MTarget<M>, M::Key>`, as
     /// returned by [`insert`](Self::insert), [`keys`](Self::keys), or
     /// [`cast_key_of`](Self::cast_key_of); a concrete-typed key reaches it

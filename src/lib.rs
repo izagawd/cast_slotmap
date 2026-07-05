@@ -18,8 +18,7 @@
 //!   are stored in a box that records its concrete [`TypeId`](std::any::TypeId)
 //!   (such as [`CastBox`]); every keyed lookup recovers the type id implied by
 //!   the key's metadata ([`type_id_from_meta`]) and compares it to the slot's.
-//!   A stale, mistyped, or foreign key returns `None` instead of being unsound
-//!   — no per-map identity needed.
+//!   A stale, mistyped, or foreign key returns `None` instead of being unsound.
 //! - [`UnsafeDenseCastMap`] / [`DenseCastMap`] — the same raw/checked pair over
 //!   [`slotmap::DenseSlotMap`], which stores values contiguously for fast
 //!   iteration. The cast-key API is identical to the basic maps'.
@@ -55,24 +54,11 @@
 //! using the vtable already cached in the key — no map access needed for the
 //! dispatch itself.
 //!
-//! # A `SlotMap`, not a stable-reference arena
-//! `slotmap::SlotMap::insert` takes `&mut self` (it is not a stable-reference,
-//! interior-mutability arena; `DenseSlotMap` is the same), so every mutating
-//! method here — `insert*`, `remove`, `reserve`, `clear`, `retain`, `drain` —
-//! takes `&mut self`. Because `get` borrows `&self` while `insert` borrows
-//! `&mut self`, references and inserts can never coexist; consequently the
-//! shared [`iter`](CastMapG::iter) is plain safe (no `unsafe_iter`), `Clone` is
-//! a normal forward, and there is no `get_slot`, `get_by_index_only`, or
-//! `reset` — `slotmap` exposes no such operations. `clear` is the native way to
-//! invalidate all keys.
-//!
 //! # Nightly
 //! Pointer-metadata reconstruction and the dyn-dispatchable key rely on the
 //! unstable `ptr_metadata`, `coerce_unsized`, `unsize`, `dispatch_from_dyn`,
 //! `arbitrary_self_types`, and `arbitrary_self_types_pointers` features, so
-//! this crate requires a **nightly** toolchain. It is single-threaded in
-//! spirit, mirroring `slotmap::SlotMap`'s own `Send`/`Sync` behavior (which
-//! depends on the stored value).
+//! this crate requires a **nightly** toolchain.
 //!
 //! # Example
 //! ```ignore

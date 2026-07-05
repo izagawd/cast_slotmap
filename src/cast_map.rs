@@ -12,10 +12,7 @@
 //! Soundness, briefly: `slotmap`'s version check proves the slot is occupied
 //! and current; the type-id check proves the key's metadata describes the
 //! concrete type actually stored there. Together they make rebuilding `&T`
-//! from data pointer + key metadata sound, with **no per-map identity**: keys
-//! are plain [`CastKey`]s, and even a key from a different map is memory-safe
-//! (it resolves if — and only if — the slot it names holds a value of the
-//! key's type).
+//! from data pointer + key metadata sound.
 //!
 //! This safety hinges on a stored type id, so the checked lookups require
 //! `M::Value: ConcreteTypeId` — satisfied by [`CastBox`] (e.g. [`BoxCastMap`])
@@ -76,8 +73,8 @@ where
     M: SlotMapTrait + Clone,
 {
     /// Clones the map. Because lookups are validated by slot version and
-    /// stored type id — not per-map identity — keys from the original resolve
-    /// on the clone too (they name the same slots holding the same types).
+    /// stored type id, keys from the original resolve on the clone too (they
+    /// name the same slots holding the same types).
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -608,38 +605,40 @@ where
 
 // ─── Index / IndexMut ────────────────────────────────────────────────────────
 
-impl<M> std::ops::Index<CastKey<MTarget<M>, M::Key>> for CastMapG<M>
+impl<M, T: ?Sized + AnyHaver + Pointee> std::ops::Index<CastKey<T, M::Key>> for CastMapG<M>
 where
     M: SlotMapTrait,
     M::Value: StableDeref + ConcreteTypeId,
-    MTarget<M>: Pointee + AnyHaver,
+    MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
+    <T as Pointee>::Metadata: Copy,
 {
-    type Output = MTarget<M>;
+    type Output = T;
 
     #[inline]
-    fn index(&self, key: CastKey<MTarget<M>, M::Key>) -> &Self::Output {
+    fn index(&self, key: CastKey<T, M::Key>) -> &T {
         self.get(key).expect("invalid CastKey for this map")
     }
 }
 
-impl<M> std::ops::IndexMut<CastKey<MTarget<M>, M::Key>> for CastMapG<M>
+impl<M, T: ?Sized + AnyHaver + Pointee> std::ops::IndexMut<CastKey<T, M::Key>> for CastMapG<M>
 where
     M: SlotMapTrait,
     M::Value: StableDeref + DerefMut + ConcreteTypeId,
-    MTarget<M>: Pointee + AnyHaver,
+    MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
+    <T as Pointee>::Metadata: Copy,
 {
     #[inline]
-    fn index_mut(&mut self, key: CastKey<MTarget<M>, M::Key>) -> &mut Self::Output {
+    fn index_mut(&mut self, key: CastKey<T, M::Key>) -> &mut T {
         self.get_mut(key).expect("invalid CastKey for this map")
     }
 }
 
 // ─── Iterators ───────────────────────────────────────────────────────────────
 
-// With per-map identity gone, keys need no re-wrapping: the checked map's
-// iterators are the unsafe map's iterators.
+// The checked map's iterators are the unsafe map's iterators: keys need no
+// re-wrapping.
 
 /// Shared iterator over `(CastKey, &Target)` pairs.
 pub type Iter<'a, M> = unsafe_cast_map::Iter<'a, M>;

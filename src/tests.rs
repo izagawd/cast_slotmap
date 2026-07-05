@@ -1,6 +1,5 @@
 //! Tests for the cast slot maps. These exercise the public surface and the
-//! type-id / version-based soundness checks specific to this crate, on top of
-//! `slotmap`'s `&mut self` mutation model.
+//! type-id / version-based soundness checks specific to this crate.
 
 use std::any::Any;
 
@@ -151,8 +150,8 @@ fn clear_invalidates_keys() {
 
 // ─── cross-map keys under the type-id model ──────────────────────────────────
 //
-// There is no per-map identity: a foreign key is memory-safe, resolving iff
-// the slot it names is live and holds a value of the key's type.
+// A foreign key is memory-safe, resolving if the slot it names is live and
+// holds a value of the key's type.
 
 #[test]
 fn cross_map_wrong_type_is_rejected() {
@@ -298,8 +297,8 @@ fn clone_keys_stay_valid() {
     // `Clone` (its inner `Box<T: ?Sized>` isn't), so the checked box maps are
     // never `Clone`; the unsafe map storing `Box<u32>` is, and demonstrates
     // the shared semantics: checking is by slot version (plus, on the checked
-    // layer, stored type id) rather than per-map identity, so keys minted by
-    // the original remain valid on the clone.
+    // layer, stored type id), so keys minted by the original remain valid on
+    // the clone.
     let mut map: UnsafeBoxCastMap<DefaultKey, u32> = UnsafeBoxCastMap::new();
     let key: CastKey<u32> = map.insert(Box::new(7u32));
 
