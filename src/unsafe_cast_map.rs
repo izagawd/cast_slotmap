@@ -13,7 +13,8 @@
 //! Typed lookups go through [`CastKey`], but `get`, `get_mut`, `remove`, and
 //! `downcast_key` are **`unsafe`**: the caller must ensure the key's pointer
 //! metadata is valid for the data stored at that slot. For a safe wrapper that
-//! checks a per-map [`MapId`](crate::map_id::MapId), see
+//! validates each lookup against the slot's stored concrete type id (see
+//! [`ConcreteTypeId`](crate::cast_box::ConcreteTypeId)), see
 //! [`CastMapG`](crate::cast_map::CastMapG) (and its aliases).
 //!
 //! ## Relationship to `slotmap`
@@ -33,7 +34,7 @@
 
 use std::any::{Any, TypeId};
 use std::collections::TryReserveError;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::ptr::Pointee;
 
 use slotmap::{DenseSlotMap, Key, SlotMap};
@@ -76,9 +77,7 @@ where
     M: SlotMapTrait + Clone,
 {
     /// Cloning preserves every slot's key and version, so keys valid on the
-    /// original stay valid on the clone (the safe
-    /// [`CastMapG`](crate::cast_map::CastMapG) layer, by contrast, mints a fresh
-    /// [`MapId`](crate::map_id::MapId) on clone).
+    /// original stay valid on the clone.
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -304,6 +303,64 @@ where
             .get(inner_key)
             .expect("just-inserted key is live");
         Ok(to_castable::<M::Key, MTarget<M>>(inner_key, &**reference))
+    }
+
+    // ── insert_sized ─────────────────────────────────────────────────────
+
+    /// Inserts a concrete-typed smart pointer (coerced into `M::Value` on the
+    /// way in), returning a [`CastKey`] whose metadata is for
+    /// `ConcretePtr::Target` (not the erased output type).
+    #[inline]
+    pub fn insert_sized<ConcretePtr>(
+        &mut self,
+        value: ConcretePtr,
+    ) -> CastKey<ConcretePtr::Target, M::Key>
+    where
+        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        ConcretePtr::Target: Sized,
+    {
+        self.insert_sized_with_key(|_| value)
+    }
+
+    /// Inserts a concrete smart pointer produced by `func`, which receives the
+    /// fully-typed [`CastKey`] the value will live under.
+    #[inline]
+    pub fn insert_sized_with_key<ConcretePtr>(
+        &mut self,
+        func: impl FnOnce(CastKey<ConcretePtr::Target, M::Key>) -> ConcretePtr,
+    ) -> CastKey<ConcretePtr::Target, M::Key>
+    where
+        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        ConcretePtr::Target: Sized,
+    {
+        self.try_insert_sized_with_key(|key| Ok::<_, ()>(func(key)))
+            .unwrap()
+    }
+
+    /// Like [`insert_sized_with_key`](Self::insert_sized_with_key) but the
+    /// closure may return `Err`, in which case nothing is inserted.
+    #[inline]
+    pub fn try_insert_sized_with_key<ConcretePtr, E>(
+        &mut self,
+        func: impl FnOnce(CastKey<ConcretePtr::Target, M::Key>) -> Result<ConcretePtr, E>,
+    ) -> Result<CastKey<ConcretePtr::Target, M::Key>, E>
+    where
+        ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
+        ConcretePtr::Target: Sized,
+    {
+        let mut saved_key: Option<CastKey<ConcretePtr::Target, M::Key>> = None;
+
+        self.inner
+            .try_insert_with_key(|inner_key| -> Result<M::Value, E> {
+                // SAFETY: `()` metadata is trivially valid for the sized
+                // `ConcretePtr::Target` about to occupy this slot.
+                let typed_key = unsafe { CastKey::from_raw_parts(inner_key, ()) };
+                saved_key = Some(typed_key);
+                let concrete: ConcretePtr = func(typed_key)?;
+                Ok(concrete)
+            })?;
+
+        Ok(saved_key.unwrap())
     }
 
     // ── cast_key_of ──────────────────────────────────────────────────────

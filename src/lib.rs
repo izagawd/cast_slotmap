@@ -1,11 +1,11 @@
 //! Castable-key wrappers over the [`slotmap`] crate's
 //! [`SlotMap`](slotmap::SlotMap) and [`DenseSlotMap`](slotmap::DenseSlotMap).
 //!
-//! Store type-erased heterogeneous values (e.g. `Box<dyn Any>`) and hand back
-//! typed [`CastKey`]s, so `map.get(key)` returns a correctly typed `&T` with no
-//! `downcast_ref` at the call site.
+//! Store type-erased heterogeneous values (e.g. `CastBox<dyn Any>`) and hand
+//! back typed [`CastKey`]s, so `map.get(key)` returns a correctly typed `&T`
+//! with no `downcast_ref` at the call site.
 //!
-//! Two axes, four maps. The **identity** axis is raw vs. checked; the
+//! Two axes, four maps. The **checking** axis is raw vs. type-id-checked; the
 //! **storage** axis is basic vs. dense:
 //!
 //! - [`UnsafeCastMap`] — the low-level map over [`slotmap::SlotMap`]. Lookups
@@ -14,13 +14,15 @@
 //!   key's cached metadata without checking it still matches the value in the
 //!   slot, so using a key whose slot holds a different type is undefined
 //!   behavior.
-//! - [`CastMap`] — the safe, recommended API over [`slotmap::SlotMap`]. Each map
-//!   gets a unique [`MapId`] on creation and every [`StableCastKey`] carries it,
-//!   so a key from map A used on map B returns `None` instead of being unsound.
+//! - [`CastMap`] — the safe, recommended API over [`slotmap::SlotMap`]. Values
+//!   are stored in a box that records its concrete [`TypeId`](std::any::TypeId)
+//!   (such as [`CastBox`]); every keyed lookup recovers the type id implied by
+//!   the key's metadata ([`type_id_from_meta`]) and compares it to the slot's.
+//!   A stale, mistyped, or foreign key returns `None` instead of being unsound
+//!   — no per-map identity needed.
 //! - [`UnsafeDenseCastMap`] / [`DenseCastMap`] — the same raw/checked pair over
 //!   [`slotmap::DenseSlotMap`], which stores values contiguously for fast
-//!   iteration (see [`UnsafeDenseCastMap`] for the storage trade-offs). The
-//!   cast-key API is identical to the basic maps'.
+//!   iteration. The cast-key API is identical to the basic maps'.
 //!
 //! All four maps support disjoint mutable access via `get_disjoint_mut` (typed,
 //! by [`CastKey`]) and `get_disjoint_mut_by_inner_key` (by backing key), each
@@ -28,12 +30,20 @@
 //!
 //! Under the hood there are really just **two** generic types,
 //! [`UnsafeCastMapG`] and [`CastMapG`], each parameterized over a backing
-//! `slotmap` map `M` implementing [`SlotMapTrait`]. The four maps above are type
-//! aliases that pin `M` to `SlotMap` or `DenseSlotMap`.
+//! `slotmap` map `M` implementing [`SlotMapTrait`]. The four maps above are
+//! type aliases that pin `M` to `SlotMap` or `DenseSlotMap`.
 //!
-//! For the common `Box` case use the aliases [`BoxCastMap`] / [`UnsafeBoxCastMap`]
-//! (and [`BoxDenseCastMap`] / [`UnsafeBoxDenseCastMap`]), typically with
-//! `dyn Any`: `BoxCastMap<DefaultKey, dyn Any>`.
+//! For the common case use the aliases [`BoxCastMap`] / [`BoxDenseCastMap`]
+//! (which store [`CastBox`]) — typically with `dyn Any`:
+//! `BoxCastMap<DefaultKey, dyn Any>`. The raw maps have [`UnsafeBoxCastMap`] /
+//! [`UnsafeBoxDenseCastMap`], storing plain `Box`.
+//!
+//! # Dyn-dispatchable keys
+//! [`DynKey`] (via [`CastKey::as_dyn`]) reshapes a borrowed key into a valid
+//! trait-object method receiver, so traits can declare
+//! `fn m(self: DynKey<Self>, ..)` and be dispatched through `DynKey<dyn Trait>`
+//! using the vtable already cached in the key — no map access needed for the
+//! dispatch itself.
 //!
 //! # A `SlotMap`, not a stable-reference arena
 //! `slotmap::SlotMap::insert` takes `&mut self` (it is not a stable-reference,
@@ -41,44 +51,51 @@
 //! method here — `insert*`, `remove`, `reserve`, `clear`, `retain`, `drain` —
 //! takes `&mut self`. Because `get` borrows `&self` while `insert` borrows
 //! `&mut self`, references and inserts can never coexist; consequently the
-//! shared [`iter`](CastMap::iter) is plain safe (no `unsafe_iter`), `Clone` is a
-//! normal forward (no `unsafe_clone`/`clone_mut`), and there is no `get_slot`,
-//! `get_by_index_only`, or `reset` — `slotmap` exposes no such operations.
-//! `clear` is the native way to invalidate all keys.
+//! shared [`iter`](CastMapG::iter) is plain safe (no `unsafe_iter`), `Clone` is
+//! a normal forward, and there is no `get_slot`, `get_by_index_only`, or
+//! `reset` — `slotmap` exposes no such operations. `clear` is the native way to
+//! invalidate all keys.
 //!
 //! # Nightly
-//! Pointer-metadata reconstruction relies on the unstable `ptr_metadata`,
-//! `coerce_unsized`, and `unsize` features, so this crate requires a **nightly**
-//! toolchain. It is single-threaded in spirit, mirroring `slotmap::SlotMap`'s
-//! own `Send`/`Sync` behavior (which depends on the stored value).
+//! Pointer-metadata reconstruction and the dyn-dispatchable key rely on the
+//! unstable `ptr_metadata`, `coerce_unsized`, `unsize`, `dispatch_from_dyn`,
+//! `arbitrary_self_types`, and `arbitrary_self_types_pointers` features, so
+//! this crate requires a **nightly** toolchain. It is single-threaded in
+//! spirit, mirroring `slotmap::SlotMap`'s own `Send`/`Sync` behavior (which
+//! depends on the stored value).
 //!
 //! # Example
 //! ```ignore
-//! #![feature(ptr_metadata, coerce_unsized, unsize)]
-//! use cast_slotmap::{BoxCastMap, DefaultKey, StableCastKey};
+//! use cast_slotmap::{BoxCastMap, CastBox, CastKey, DefaultKey};
 //! use std::any::Any;
 //!
 //! struct Dog { name: String }
 //!
 //! let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
 //!
-//! // Insert a concrete type into a `dyn Any` map; the key comes back erased.
-//! let dyn_key: StableCastKey<dyn Any> = map.insert(Box::new(Dog { name: "Rex".into() }));
-//!
-//! // Downcast the erased key to a concrete `Dog`-typed key.
-//! let dog_key: StableCastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
+//! // Insert a concrete type into a `dyn Any` map; the key comes back typed.
+//! let dog_key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Rex".into() }));
 //!
 //! assert_eq!(map.get(dog_key).unwrap().name, "Rex");
+//!
+//! // Or insert erased and recover the typed key later.
+//! let dyn_key: CastKey<dyn Any> = map.insert(CastBox::new(Dog { name: "Ax".into() }));
+//! let typed: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key).unwrap();
 //! ```
 #![feature(ptr_metadata)]
 #![feature(coerce_unsized)]
 #![feature(unsize)]
+#![feature(dispatch_from_dyn)]
+#![feature(arbitrary_self_types)]
+#![feature(arbitrary_self_types_pointers)]
 
-pub mod slotmap_trait;
+pub mod any_haver;
+pub mod cast_box;
 pub mod cast_key;
 pub mod cast_map;
-pub mod map_id;
+pub mod dyn_key;
 pub mod retype_ptr;
+pub mod slotmap_trait;
 pub mod unsafe_cast_map;
 
 // Re-export the slotmap items callers need so they don't have to depend on
@@ -86,15 +103,19 @@ pub mod unsafe_cast_map;
 pub use slotmap::{new_key_type, DefaultKey, Key, KeyData};
 
 #[doc(inline)]
-pub use cast_key::{CastKey, StableCastKey};
+pub use any_haver::{type_id_from_meta, AnyHaver};
 #[doc(inline)]
-pub use slotmap_trait::SlotMapTrait;
+pub use cast_box::{CastBox, ConcreteTypeId};
+#[doc(inline)]
+pub use cast_key::CastKey;
 #[doc(inline)]
 pub use cast_map::{BoxCastMap, BoxDenseCastMap, CastMap, CastMapG, DenseCastMap};
 #[doc(inline)]
-pub use map_id::MapId;
+pub use dyn_key::DynKey;
 #[doc(inline)]
 pub use retype_ptr::RetypePtr;
+#[doc(inline)]
+pub use slotmap_trait::SlotMapTrait;
 #[doc(no_inline)]
 pub use stable_deref_trait::StableDeref;
 #[doc(inline)]

@@ -3,7 +3,7 @@
 //! [`SlotMapTrait`] captures the slice of `slotmap`'s API that
 //! [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG) /
 //! [`CastMapG`](crate::cast_map::CastMapG) build on, so the cast logic (the
-//! pointer-metadata reconstruction, the `MapId` checks) is written **once**,
+//! pointer-metadata reconstruction, the type-id checks) is written **once**,
 //! generic over the backing map, instead of being duplicated per map kind.
 //!
 //! Two maps are provided: [`slotmap::SlotMap`] and [`slotmap::DenseSlotMap`];

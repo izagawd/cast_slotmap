@@ -1,22 +1,25 @@
-//! Castable key types for the cast slot maps.
+//! The castable key type for the cast slot maps.
 //!
-//! - [`CastKey<T, K>`] stores a `slotmap` key alongside `T`'s pointer metadata.
-//!   It is the bare key used by [`UnsafeCastMap`](crate::unsafe_cast_map::UnsafeCastMap).
-//! - [`StableCastKey<T, K>`] wraps a `CastKey` and adds a [`MapId`](crate::map_id::MapId),
-//!   making it safe to use with [`CastMap`](crate::cast_map::CastMap)
-//!   (cross-map misuse returns `None` instead of being unsound).
+//! [`CastKey<T, K>`] stores a `slotmap` key alongside `T`'s pointer metadata.
+//! It is the bare key of [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG);
+//! the checked [`CastMapG`](crate::cast_map::CastMapG) uses the *same* key type
+//! and instead validates lookups against each slot's stored concrete
+//! [`TypeId`](std::any::TypeId) (see [`ConcreteTypeId`](crate::cast_box::ConcreteTypeId)),
+//! so no extra map-identity wrapper is needed.
 //!
-//! Neither is a `slotmap::Key`; the map wrappers convert at the boundary via
-//! [`inner_key`](CastKey::inner_key).
+//! `CastKey` is not a `slotmap::Key`; the map wrappers convert at the boundary
+//! via [`inner_key`](CastKey::inner_key).
 //!
 //! Because `slotmap`'s keys are `Copy`, a `CastKey` simply holds the key by
-//! value.
+//! value. For dyn dispatch on a key, see [`DynKey`](crate::dyn_key::DynKey) /
+//! [`as_dyn`](CastKey::as_dyn).
 
+use std::ptr;
 use std::ptr::Pointee;
 
 use slotmap::{DefaultKey, Key, KeyData};
 
-use crate::map_id::MapId;
+use crate::dyn_key::DynKey;
 
 // ─── CastKey<T, K> ───────────────────────────────────────────────────────────
 
@@ -31,7 +34,7 @@ where
     <T as Pointee>::Metadata: Copy,
 {
     pub(crate) key: K,
-    metadata: <T as Pointee>::Metadata,
+    dd: *const T,
 }
 
 impl<T: ?Sized + Pointee, K: Key> Clone for CastKey<T, K>
@@ -92,13 +95,20 @@ where
     /// Returns the pointer metadata for `T`.
     #[inline]
     pub fn metadata(&self) -> <T as Pointee>::Metadata {
-        self.metadata
+        std::ptr::metadata(self.dd)
     }
 
     /// Strips the pointer metadata, producing the backing `slotmap` key.
     #[inline]
     pub fn inner_key(&self) -> K {
         self.key
+    }
+
+    /// Borrows this key into its dyn-dispatchable form, usable as a trait
+    /// method receiver (`fn m(self: DynKey<Self>, ..)`).
+    #[inline]
+    pub fn as_dyn(&self) -> DynKey<'_, T, K> {
+        DynKey::new(self)
     }
 
     /// Upcasts the key's metadata from `T` to `U` where `T: Unsize<U>`
@@ -110,11 +120,11 @@ where
         T: std::marker::Unsize<U>,
         <U as Pointee>::Metadata: Copy,
     {
-        let dummy: *const T = std::ptr::from_raw_parts(std::ptr::null::<()>(), self.metadata);
+        let dummy: *const T = std::ptr::from_raw_parts(std::ptr::null::<()>(), self.metadata());
         let upcast: *const U = dummy;
         CastKey {
             key: self.key,
-            metadata: std::ptr::metadata(upcast),
+            dd: std::ptr::from_raw_parts(ptr::null::<()>(), std::ptr::metadata(upcast)),
         }
     }
 
@@ -124,128 +134,9 @@ where
     /// `metadata` must be valid for the value identified by `key`.
     #[inline]
     pub unsafe fn from_raw_parts(key: K, metadata: <T as Pointee>::Metadata) -> Self {
-        Self { key, metadata }
-    }
-}
-
-// ─── StableCastKey<T, K> ─────────────────────────────────────────────────────
-
-/// A [`CastKey`] paired with a [`MapId`] so that cross-map misuse is caught at
-/// runtime (returns `None`) rather than being unsound.
-pub struct StableCastKey<T: ?Sized + Pointee, K: Key = DefaultKey>
-where
-    <T as Pointee>::Metadata: Copy,
-{
-    pub(crate) map_id: MapId,
-    pub(crate) inner: CastKey<T, K>,
-}
-
-impl<T: ?Sized + Pointee, K: Key> Clone for StableCastKey<T, K>
-where
-    <T as Pointee>::Metadata: Copy,
-{
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: ?Sized + Pointee, K: Key> Copy for StableCastKey<T, K> where <T as Pointee>::Metadata: Copy {}
-
-impl<T: ?Sized + Pointee, K: Key> std::fmt::Debug for StableCastKey<T, K>
-where
-    <T as Pointee>::Metadata: Copy,
-{
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StableCastKey")
-            .field("key", &self.inner.key)
-            .field("map_id", &self.map_id)
-            .finish()
-    }
-}
-
-impl<T: ?Sized + Pointee, K: Key> PartialEq for StableCastKey<T, K>
-where
-    <T as Pointee>::Metadata: Copy,
-{
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.inner.key == other.inner.key && self.map_id == other.map_id
-    }
-}
-
-impl<T: ?Sized + Pointee, K: Key> Eq for StableCastKey<T, K> where <T as Pointee>::Metadata: Copy {}
-
-impl<T: ?Sized + Pointee, K: Key> std::hash::Hash for StableCastKey<T, K>
-where
-    <T as Pointee>::Metadata: Copy,
-{
-    #[inline]
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.inner.key.hash(state);
-        self.map_id.hash(state);
-    }
-}
-
-impl<T: ?Sized + Pointee, K: Key> StableCastKey<T, K>
-where
-    <T as Pointee>::Metadata: Copy,
-{
-    /// Constructs a `StableCastKey` from its raw cast key and map id.
-    ///
-    /// # Safety
-    /// `map_id` must identify the map that owns the slot addressed by
-    /// `cast_key.inner_key()`, and the metadata must be valid for `T`.
-    #[inline]
-    pub unsafe fn from_raw_parts(cast_key: CastKey<T, K>, map_id: MapId) -> Self {
-        StableCastKey {
-            inner: cast_key,
-            map_id,
-        }
-    }
-
-    /// Returns the backing `slotmap` [`KeyData`].
-    #[inline]
-    pub fn key_data(&self) -> KeyData {
-        self.inner.key.data()
-    }
-
-    /// Returns the pointer metadata for `T`.
-    #[inline]
-    pub fn metadata(&self) -> <T as Pointee>::Metadata {
-        self.inner.metadata()
-    }
-
-    /// Returns the map identity this key is bound to.
-    #[inline]
-    pub fn map_id(&self) -> MapId {
-        self.map_id
-    }
-
-    /// Strips the metadata and map id, producing the backing `slotmap` key.
-    #[inline]
-    pub fn inner_key(&self) -> K {
-        self.inner.inner_key()
-    }
-
-    /// Returns the underlying [`CastKey`] without the map id.
-    #[inline]
-    pub fn cast_key(&self) -> CastKey<T, K> {
-        self.inner
-    }
-
-    /// Upcasts the key's metadata from `T` to `U` where `T: Unsize<U>`.
-    /// The map id is preserved.
-    #[inline]
-    pub fn upcast<U: ?Sized + Pointee>(self) -> StableCastKey<U, K>
-    where
-        T: std::marker::Unsize<U>,
-        <U as Pointee>::Metadata: Copy,
-    {
-        StableCastKey {
-            inner: self.inner.upcast(),
-            map_id: self.map_id,
+        Self {
+            key,
+            dd: std::ptr::from_raw_parts(ptr::null::<()>(), metadata),
         }
     }
 }
