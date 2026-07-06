@@ -123,7 +123,6 @@ impl<P: DerefMut> DerefMut for TypeTaggedPtr<P> {
 
 impl<P: CoerceUnsized<Q>, Q> CoerceUnsized<TypeTaggedPtr<Q>> for TypeTaggedPtr<P> {}
 
-
 unsafe impl<P: StableDeref> StableDeref for TypeTaggedPtr<P> {}
 
 unsafe impl<'a, P: RetypePtr<'a>> RetypePtr<'a> for TypeTaggedPtr<P> {

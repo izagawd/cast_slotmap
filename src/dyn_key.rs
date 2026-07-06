@@ -19,9 +19,10 @@
 //! confirmed at compile time against `as_ffi` / `from_ffi`):
 //! - **`size_of::<u64>() <= size_of::<usize>()`:** the address is the
 //!   key's packed [`KeyData`] via [`KeyData::as_ffi`] — zero-extended when
-//!   the address is wider (e.g. a 128-bit target) — relying only on its
-//!   documented guarantee (round-tripping through [`KeyData::from_ffi`]),
-//!   never the key's byte layout, which could contain padding.
+//!   the address is wider (e.g. a 128-bit target) — relying on its
+//!   documented guarantee (round-tripping through [`KeyData::from_ffi`])
+//!   plus its current packing keeping the value nonzero, never the key's
+//!   byte layout, which could contain padding.
 //! - **Otherwise** (e.g. a 32-bit target): the address is a real pointer to
 //!   the borrowed key's backing `K` field, which the `'a` borrow keeps
 //!   alive. Only `K` is read back (its type is the same for every `T`); the
