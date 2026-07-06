@@ -5,8 +5,8 @@
 //! [`CastMapG`](crate::cast_map::CastMapG)'s safety comes from comparing a
 //! key's metadata-implied type id against the type id stored next to the
 //! value. Something has to *store* that type id: [`TypeTaggedPtr`] does, for any
-//! wrapped pointer (`Box`, `Rc`, `Arc`, `&T`, `&mut T`, ...). Custom stores
-//! can participate by implementing [`ConcreteTypeId`].
+//! wrapped pointer (`Box`, `Rc`, `Arc`, `&T`, `&mut T`, ...). Custom stored
+//! pointer types can participate by implementing [`ConcreteTypeId`].
 
 use std::any::TypeId;
 use std::ops::{CoerceUnsized, Deref, DerefMut};
@@ -38,8 +38,9 @@ pub struct TypeTaggedPtr<P> {
     type_id: TypeId,
 }
 
-/// An owning, pointer-stable box that remembers the concrete [`TypeId`] of
-/// the value it was constructed from: [`TypeTaggedPtr`] wrapping a [`Box`].
+/// [`TypeTaggedPtr`] wrapping a [`Box`]: an owning, pointer-stable form
+/// that remembers the concrete [`TypeId`] of the value it was constructed
+/// from.
 pub type TypeTaggedBox<T: ?Sized> = TypeTaggedPtr<Box<T>>;
 
 impl<T: 'static> TypeTaggedPtr<Box<T>> {
@@ -138,22 +139,23 @@ unsafe impl<'a, P: RetypePtr<'a>> RetypePtr<'a> for TypeTaggedPtr<P> {
 
 // ─── ConcreteTypeId ──────────────────────────────────────────────────────────
 
-/// A stored value that knows the concrete [`TypeId`] of what it owns.
+/// A stored pointer that knows the concrete [`TypeId`] of its pointee.
 ///
 /// This is the extension point for [`CastMapG`](crate::cast_map::CastMapG):
 /// its checked lookups read it to validate a key's type. The crate implements
 /// it for [`TypeTaggedPtr`] (and thus [`TypeTaggedBox`]), but it is deliberately a
-/// public, box-level trait — to use your own owning box with the checked
-/// maps, implement `ConcreteTypeId` for it (alongside `Deref` +
-/// [`StableDeref`], which any stored pointer needs). Nothing here assumes
-/// `TypeTaggedPtr` specifically.
+/// public, standalone trait — to use your own stored pointer type with
+/// [`CastMapG`](crate::cast_map::CastMapG), implement `ConcreteTypeId` for it
+/// (alongside `Deref` + [`StableDeref`], which any stored pointer needs).
+/// Nothing here assumes `TypeTaggedPtr` specifically.
 ///
-/// Why store the type id instead of asking the value? Not every store answers
-/// correctly: `Box<dyn Any>` could, but for a `Box<dyn Foo>` where `Foo` is
-/// not an `Any` subtrait, `type_id` resolves statically to
+/// Why store the type id instead of asking the value? Not every stored
+/// pointer answers correctly: `Box<dyn Any>` could, but for a `Box<dyn Foo>`
+/// where `Foo` is not an `Any` subtrait, `type_id` resolves statically to
 /// `TypeId::of::<dyn Foo>()` — not the underlying type's — and
-/// special-casing the stores that answer correctly would make the checked
-/// maps' behavior depend confusingly on the store's type. An
+/// special-casing the stored pointers that answer correctly would make
+/// [`CastMapG`](crate::cast_map::CastMapG)'s behavior depend confusingly on
+/// the stored pointer's type. An
 /// explicitly stored type id works uniformly — and is also a performance win: a
 /// plain field read per lookup instead of a virtual call to ask the value.
 ///
@@ -161,11 +163,11 @@ unsafe impl<'a, P: RetypePtr<'a>> RetypePtr<'a> for TypeTaggedPtr<P> {
 /// [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups (`get`,
 /// `get_mut`, `remove`, `get_disjoint_mut`, `downcast_key`) rebuild typed
 /// references based on this value: `concrete_type_id` must return the
-/// [`TypeId`] of the concrete type of the value this box currently owns. A
+/// [`TypeId`] of the concrete type of its current pointee. A
 /// wrong answer lets one of those safe lookups reinterpret the value as
 /// another type, which is undefined behavior.
 pub unsafe trait ConcreteTypeId {
-    /// The concrete type id of the value this box owns.
+    /// The concrete type id of this pointer's pointee.
     fn concrete_type_id(&self) -> TypeId;
 }
 

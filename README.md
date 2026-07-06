@@ -26,8 +26,9 @@ dense):
   reading past the end of the value, and so on. That's undefined behavior, not a
   `None`. Reach for it only when you can guarantee the key's type still matches the value in its slot.
 - **`CastMap<K, Ptr>`** — the safe, recommended API over `slotmap::SlotMap`.
-  Values live in a box that records its concrete `TypeId` (`TypeTaggedBox`, or any
-  box implementing `ConcreteTypeId` — an `unsafe` trait, since a wrong type id
+  Values live behind a type-tagged pointer that records their concrete
+  `TypeId` (`TypeTaggedBox`, or any stored pointer implementing
+  `ConcreteTypeId` — an `unsafe` trait, since a wrong type id
   would make the checked lookups unsound); every keyed lookup recovers the type id
   implied by the key's metadata, and compares it to the
   slot's. A mistyped key returns `None` instead of being

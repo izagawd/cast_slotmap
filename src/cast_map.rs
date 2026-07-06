@@ -3,8 +3,8 @@
 //!
 //! Where the low-level map's `get` / `get_mut` / `remove` are `unsafe` (the
 //! caller must promise the key's metadata fits the slot), [`CastMapG`] makes
-//! them safe: every value lives in a box that records its concrete
-//! [`TypeId`] (see [`ConcreteTypeId`]), and a lookup recovers the type id
+//! them safe: every value sits behind a stored pointer that records its
+//! concrete [`TypeId`] (see [`ConcreteTypeId`]), and a lookup recovers the type id
 //! implied by the key's metadata (via [`type_id_from_meta`]) and compares it to
 //! the slot's. A mismatch — wrong type or recycled slot — returns `None`
 //! instead of risking UB.
@@ -16,12 +16,13 @@
 //!
 //! This safety hinges on a stored type id, so the checked lookups require
 //! `M::Value: ConcreteTypeId` — satisfied by [`TypeTaggedBox`] (e.g. [`BoxCastMap`])
-//! or any custom box that implements [`ConcreteTypeId`]. A plain `Box` does
-//! not qualify: `Box<dyn Any>` could ask its value, but for a `Box<dyn Foo>`
-//! where `Foo` is not an `Any` subtrait, `type_id` resolves statically to
-//! `TypeId::of::<dyn Foo>()` — not the underlying type's — so the checked
-//! map requires an explicitly stored id rather than special-casing some
-//! stores. Plain `Box` works with [`UnsafeCastMapG`].
+//! or any custom stored pointer that implements [`ConcreteTypeId`]. A plain
+//! `Box` does not qualify: `Box<dyn Any>` could ask its value, but for a
+//! `Box<dyn Foo>` where `Foo` is not an `Any` subtrait, `type_id` resolves
+//! statically to `TypeId::of::<dyn Foo>()` — not the underlying type's — so
+//! the checked map requires an explicitly stored type id rather than
+//! special-casing some stored pointers. Plain `Box` works with
+//! [`UnsafeCastMapG`].
 //!
 //! On the key side, lookups require `T: AnyHaver`: sized types always qualify;
 //! trait objects qualify when the trait declares `AnyHaver` as a supertrait.
@@ -424,9 +425,7 @@ where
     ) -> Option<CastKey<Concrete, M::Key>> {
         let stored = self.inner.inner.get(key)?;
         if stored.concrete_type_id() == TypeId::of::<Concrete>() {
-            // SAFETY: `()` metadata is trivially valid for the sized
-            // `Concrete`, which the slot was just proven to hold.
-            Some(unsafe { CastKey::from_raw_parts(key, ()) })
+            Some(CastKey::from_raw_parts(key, ()))
         } else {
             None
         }

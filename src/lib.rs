@@ -15,8 +15,9 @@
 //!   slot, so using a key whose slot holds a different type is undefined
 //!   behavior.
 //! - [`CastMap`] — the safe, recommended API over [`slotmap::SlotMap`]. Values
-//!   are stored in a box that records its concrete [`TypeId`](std::any::TypeId)
-//!   (such as [`TypeTaggedBox`], an alias of [`TypeTaggedPtr`]`<Box<T>>`); every keyed lookup recovers the type id implied by
+//!   are stored behind a type-tagged pointer that records their concrete
+//!   [`TypeId`](std::any::TypeId) (such as [`TypeTaggedBox`], an alias of
+//!   [`TypeTaggedPtr`]`<Box<T>>`); every keyed lookup recovers the type id implied by
 //!   the key's metadata ([`type_id_from_meta`]) and compares it to the slot's.
 //!   A stale, mistyped, or foreign key returns `None` instead of being unsound.
 //! - [`UnsafeDenseCastMap`] / [`DenseCastMap`] — the same raw/checked pair over

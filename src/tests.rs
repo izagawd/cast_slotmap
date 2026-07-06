@@ -112,9 +112,7 @@ fn remove_wrong_type_is_rejected() {
     let dog_key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Kept".into() }));
 
     // Forge a `Cat`-typed key naming the same slot; the type check refuses it.
-    // SAFETY of the test's premise: `from_raw_parts` is the unsafe key-construction
-    // path — the map must remain safe against exactly this.
-    let wrong: CastKey<Cat> = unsafe { CastKey::from_raw_parts(dog_key.inner_key(), ()) };
+    let wrong: CastKey<Cat> = CastKey::from_raw_parts(dog_key.inner_key(), ());
     assert!(map.remove(wrong).is_none());
     assert!(map.get(wrong).is_none());
     assert_eq!(map.get(dog_key).unwrap().name, "Kept");
@@ -625,7 +623,7 @@ fn get_disjoint_mut_wrong_type_is_rejected() {
 
     // Forge a `Cat`-typed key naming the same live slot; the per-key type-id
     // pre-check must refuse it before any mutable borrow is handed out.
-    let wrong: CastKey<Cat> = unsafe { CastKey::from_raw_parts(k.inner_key(), ()) };
+    let wrong: CastKey<Cat> = CastKey::from_raw_parts(k.inner_key(), ());
     assert!(map.get_disjoint_mut([wrong]).is_none());
 
     // The honest key is unaffected.

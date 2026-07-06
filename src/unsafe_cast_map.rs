@@ -46,7 +46,7 @@ where
     <O as Pointee>::Metadata: Copy,
 {
     let metadata = std::ptr::metadata(reference as *const O);
-    unsafe { CastKey::from_raw_parts(key, metadata) }
+    CastKey::from_raw_parts(key, metadata)
 }
 
 // ─── UnsafeCastMapG ────────────────────────────────────────────────────────────
@@ -357,9 +357,7 @@ where
 
         self.inner
             .try_insert_with_key(|inner_key| -> Result<M::Value, E> {
-                // SAFETY: `()` metadata is trivially valid for the sized
-                // `ConcretePtr::Target` about to occupy this slot.
-                let typed_key = unsafe { CastKey::from_raw_parts(inner_key, ()) };
+                let typed_key = CastKey::from_raw_parts(inner_key, ());
                 saved_key = Some(typed_key);
                 let concrete: ConcretePtr = func(typed_key)?;
                 Ok(concrete)
@@ -432,9 +430,7 @@ where
                 Ok(concrete)
             })?;
 
-        // SAFETY: `metadata` was read from the exact value now living under
-        // `inner_key`.
-        Ok(unsafe { CastKey::from_raw_parts(inner_key, saved_metadata.unwrap()) })
+        Ok(CastKey::from_raw_parts(inner_key, saved_metadata.unwrap()))
     }
 
     // ── cast_key_of ──────────────────────────────────────────────────────

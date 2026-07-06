@@ -135,12 +135,9 @@ where
         }
     }
 
-    /// Build a cast key from raw parts.
-    ///
-    /// # Safety
-    /// `metadata` must be valid for the value identified by `key`.
+    /// Builds a cast key from raw parts.
     #[inline]
-    pub unsafe fn from_raw_parts(key: K, metadata: <T as Pointee>::Metadata) -> Self {
+    pub fn from_raw_parts(key: K, metadata: <T as Pointee>::Metadata) -> Self {
         Self { key, metadata }
     }
 }

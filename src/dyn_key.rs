@@ -154,10 +154,7 @@ where
             // `from_ffi(as_ffi(k)) == k` is the documented round-trip
             // guarantee; nothing about the value's layout is relied on.
             let key = K::from(KeyData::from_ffi(thin.addr().get() as u64));
-            // SAFETY: `key`/`metadata` round-trip the exact values of the
-            // `CastKey` given to `new`, whose construction already vouched
-            // for the metadata.
-            unsafe { CastKey::from_raw_parts(key, metadata) }
+            CastKey::from_raw_parts(key, metadata)
         } else {
             // SAFETY: on this path `thin` points at the `K` field of the
             // `CastKey` borrowed by `new`, still alive for 'a; `K` is `Copy`
@@ -165,8 +162,7 @@ where
             // the fat pointer, which unsizing coercions keep correct for the
             // current `T`.
             let k = unsafe { thin.cast::<K>().read() };
-            // SAFETY: `k` and `metadata` describe the same borrowed key.
-            unsafe { CastKey::from_raw_parts(k, metadata) }
+            CastKey::from_raw_parts(k, metadata)
         }
     }
 }
