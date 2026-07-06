@@ -91,9 +91,8 @@ match, a pointer. `CastKey::as_dyn` instead
 borrows the key as a `DynKey<'_, T>` — a single fat
 `NonNull` whose metadata half is the key's vtable and whose address half packs
 the backing `slotmap` key — its `u64` `as_ffi` form — when
-`size_of::<u64>() <= size_of::<usize>()` (checked per target at compile time;
-nonzero is verified at runtime, not assumed from `as_ffi`'s layout), falling
-back to pointing at the borrowed key when it doesn't fit. That makes it a valid trait-object **method receiver**:
+`size_of::<u64>() <= size_of::<usize>()` (checked per target at compile time),
+falling back to pointing at the borrowed key when it doesn't fit. That makes it a valid trait-object **method receiver**:
 
 ```rust
 trait Component: AnyHaver {

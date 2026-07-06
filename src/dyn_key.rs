@@ -126,10 +126,13 @@ where
     pub fn new(key: &'a CastKey<T, K>) -> Self {
         let thin: NonNull<()> = if const { packs_in_ptr() } {
             // Packed `as_ffi` value as the address (zero-extends if `usize`
-            // is wider); pure data, never dereferenced. `as_ffi` has no
-            // documented nonzero guarantee, so check rather than assume.
-            let addr = NonZeroUsize::new(key.inner_key().data().as_ffi() as usize)
-                .expect("KeyData::as_ffi returned 0; it cannot be a NonNull address");
+            // is wider); pure data, never dereferenced.
+            // SAFETY: `as_ffi` packs the key's `NonZeroU32` version into the
+            // high 32 bits, so it is never 0, and on this path `usize` is at
+            // least 64 bits wide, so the cast cannot drop those bits.
+            let addr = unsafe {
+                NonZeroUsize::new_unchecked(key.inner_key().data().as_ffi() as usize)
+            };
             NonNull::without_provenance(addr)
         } else {
             // The key does not fit in a pointer on this target: point at the

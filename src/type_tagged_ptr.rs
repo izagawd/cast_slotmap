@@ -1,6 +1,7 @@
 //! [`TypeTaggedPtr`]: a smart pointer paired with the concrete [`TypeId`] of
-//! its pointee, plus the [`ConcreteTypeId`] extension trait the checked maps
-//! validate against. [`TypeTaggedBox`] is its owning-[`Box`] alias.
+//! its pointee, plus the [`ConcreteTypeId`] extension trait
+//! [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups validate
+//! against. [`TypeTaggedBox`] is its owning-[`Box`] alias.
 //!
 //! [`CastMapG`](crate::cast_map::CastMapG)'s safety comes from comparing a
 //! key's metadata-implied type id against the type id stored next to the
@@ -124,7 +125,6 @@ impl<P: CoerceUnsized<Q>, Q> CoerceUnsized<TypeTaggedPtr<Q>> for TypeTaggedPtr<P
 
 
 unsafe impl<P: StableDeref> StableDeref for TypeTaggedPtr<P> {}
-
 
 unsafe impl<'a, P: RetypePtr<'a>> RetypePtr<'a> for TypeTaggedPtr<P> {
     type Retyped<U: ?Sized + 'a> = TypeTaggedPtr<P::Retyped<U>>;

@@ -266,10 +266,6 @@ fn drain_empties_and_yields() {
 }
 
 // ─── typed get of a sized value inside a dyn Any map ─────────────────────────
-// (`Index`/`IndexMut` themselves require the map's *output* type to be
-// `AnyHaver`, which `dyn Any` is not — square-bracket indexing is therefore
-// exercised on the sized-output map in `index_mut_mutates` and
-// `index_panics_on_stale_key` instead.)
 
 #[test]
 fn index_reads() {

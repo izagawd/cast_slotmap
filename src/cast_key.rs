@@ -69,6 +69,8 @@ where
     }
 }
 
+// A receiver without `Deref`: lets traits take `self: CastKey<Self>` by
+// value (`arbitrary_self_types`). Static dispatch only
 impl<T: ?Sized + Pointee, K: Key> Receiver for CastKey<T, K>
 where
     <T as Pointee>::Metadata: Copy,
