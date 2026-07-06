@@ -4,7 +4,7 @@
 //!
 //! [`CastMapG`](crate::cast_map::CastMapG)'s safety comes from comparing a
 //! key's metadata-implied type id against the type id stored next to the
-//! value. Something has to *store* that id: [`TypeTaggedPtr`] does, for any
+//! value. Something has to *store* that type id: [`TypeTaggedPtr`] does, for any
 //! wrapped pointer (`Box`, `Rc`, `Arc`, `&T`, `&mut T`, ...). Custom stores
 //! can participate by implementing [`ConcreteTypeId`].
 
@@ -22,15 +22,15 @@ use crate::retype_ptr::RetypePtr;
 /// paired with the concrete [`TypeId`] of the value it points at, kept even
 /// after the pointer is coerced to a trait object.
 ///
-/// The id is captured at construction ([`from_ptr`](Self::from_ptr) /
+/// The type id is captured at construction ([`from_ptr`](Self::from_ptr) /
 /// `TypeTaggedBox::new`) and preserved across unsizing coercions
 /// (`TypeTaggedPtr<Box<Dog>> -> TypeTaggedPtr<Box<dyn Animal>>`), since
 /// unsizing only touches the inner pointer.
 ///
 /// # Invariant
 /// `type_id` is always the [`TypeId`] of the concrete type of `ptr`'s
-/// pointee. The checked maps rebuild typed references from it (see
-/// [`ConcreteTypeId`]); the `unsafe` escape hatches
+/// pointee. [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups
+/// rebuild typed references from it (see [`ConcreteTypeId`]); the `unsafe` escape hatches
 /// ([`from_raw_parts`](Self::from_raw_parts), [`inner_mut`](Self::inner_mut))
 /// make the caller responsible for keeping it true.
 pub struct TypeTaggedPtr<P> {
@@ -52,7 +52,7 @@ impl<T: 'static> TypeTaggedPtr<Box<T>> {
 
 impl<P> TypeTaggedPtr<P> {
     /// Wraps `ptr`, recording `TypeId::of::<P::Target>()`. For an
-    /// already-erased pointer whose concrete id you know, use
+    /// already-erased pointer whose concrete type id you know, use
     /// [`from_raw_parts`](Self::from_raw_parts).
     #[inline]
     pub fn from_ptr(ptr: P) -> Self
@@ -66,12 +66,13 @@ impl<P> TypeTaggedPtr<P> {
         }
     }
 
-    /// Assembles a `TypeTaggedPtr` from a pointer and an already-known id.
+    /// Assembles a `TypeTaggedPtr` from a pointer and an already-known type id.
     ///
     /// # Safety
     /// `type_id` must be the [`TypeId`] of the concrete type of `ptr`'s
-    /// pointee (the struct invariant). A wrong id lets the checked maps
-    /// reinterpret the value as another type, which is undefined behavior.
+    /// pointee (the struct invariant). A wrong type id lets
+    /// [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups reinterpret
+    /// the value as another type, which is undefined behavior.
     #[inline]
     pub unsafe fn from_raw_parts(ptr: P, type_id: TypeId) -> Self {
         Self { ptr, type_id }
@@ -88,15 +89,15 @@ impl<P> TypeTaggedPtr<P> {
     ///
     /// # Safety
     /// `&mut P` can replace or re-point the pointer — e.g. swap in a
-    /// different `Box<dyn Any>` — while the recorded id stays put. When the
-    /// borrow ends, `type_id` must still be the concrete id of the (possibly
+    /// different `Box<dyn Any>` — while the recorded type id stays put. When the
+    /// borrow ends, `type_id` must still be the concrete type id of the (possibly
     /// new) pointee, per the struct invariant.
     #[inline]
     pub unsafe fn inner_mut(&mut self) -> &mut P {
         &mut self.ptr
     }
 
-    /// Unwraps the pointer, discarding the recorded id.
+    /// Unwraps the pointer, discarding the recorded type id.
     #[inline]
     pub fn inner(self) -> P {
         self.ptr
@@ -147,20 +148,22 @@ unsafe impl<'a, P: RetypePtr<'a>> RetypePtr<'a> for TypeTaggedPtr<P> {
 /// [`StableDeref`], which any stored pointer needs). Nothing here assumes
 /// `TypeTaggedPtr` specifically.
 ///
-/// Why store the id instead of asking the value? Not every store answers
+/// Why store the type id instead of asking the value? Not every store answers
 /// correctly: `Box<dyn Any>` could, but for a `Box<dyn Foo>` where `Foo` is
 /// not an `Any` subtrait, `type_id` resolves statically to
 /// `TypeId::of::<dyn Foo>()` — not the underlying type's — and
 /// special-casing the stores that answer correctly would make the checked
 /// maps' behavior depend confusingly on the store's type. An
-/// explicitly stored id works uniformly — and is also a performance win: a
+/// explicitly stored type id works uniformly — and is also a performance win: a
 /// plain field read per lookup instead of a virtual call to ask the value.
 ///
 /// # Safety
-/// The checked maps rebuild typed references based on this value:
-/// `concrete_type_id` must return the [`TypeId`] of the concrete type of the
-/// value this box currently owns. A wrong answer lets a safe lookup
-/// reinterpret the value as another type, which is undefined behavior.
+/// [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups (`get`,
+/// `get_mut`, `remove`, `get_disjoint_mut`, `downcast_key`) rebuild typed
+/// references based on this value: `concrete_type_id` must return the
+/// [`TypeId`] of the concrete type of the value this box currently owns. A
+/// wrong answer lets one of those safe lookups reinterpret the value as
+/// another type, which is undefined behavior.
 pub unsafe trait ConcreteTypeId {
     /// The concrete type id of the value this box owns.
     fn concrete_type_id(&self) -> TypeId;
@@ -170,7 +173,7 @@ pub unsafe trait ConcreteTypeId {
 // `from_ptr` (or vouched for by the caller of `from_raw_parts`) and only ever
 // carried across unsizing coercions / `retype` — whose contract requires the
 // value to actually be the target type — while `inner_mut`'s contract makes
-// any caller who swaps the pointer keep the id accurate.
+// any caller who swaps the pointer keep the type id accurate.
 unsafe impl<P> ConcreteTypeId for TypeTaggedPtr<P> {
     #[inline]
     fn concrete_type_id(&self) -> TypeId {

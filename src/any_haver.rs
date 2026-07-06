@@ -29,9 +29,10 @@ use std::ptr::Pointee;
 /// reach it on trait objects via a supertrait bound (`trait Foo: AnyHaver`).
 ///
 /// # Safety
-/// The checked maps rebuild typed references based on this value:
-/// `haver_type_id` must return the [`TypeId`] of the true concrete `Self`.
-/// A lying implementation makes those lookups unsound.
+/// [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups (`get`,
+/// `get_mut`, `remove`, `get_disjoint_mut`) rebuild typed references based
+/// on this value: `haver_type_id` must return the [`TypeId`] of the true
+/// concrete `Self`. A lying implementation makes those lookups unsound.
 pub unsafe trait AnyHaver: 'static {
     /// Returns the [`TypeId`] of the (possibly type-erased) `Self`.
     ///
