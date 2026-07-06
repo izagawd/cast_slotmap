@@ -14,7 +14,7 @@
 //! are **`unsafe`**: the caller must ensure the key's pointer
 //! metadata is valid for the data stored at that slot. For a safe wrapper that
 //! validates each lookup against the slot's stored concrete type id (see
-//! [`ConcreteTypeId`](crate::cast_box::ConcreteTypeId)), see
+//! [`ConcreteTypeId`](crate::type_tagged_ptr::ConcreteTypeId)), see
 //! [`CastMapG`](crate::cast_map::CastMapG) (and its aliases).
 //!
 //! ## Relationship to `slotmap`
@@ -372,7 +372,7 @@ where
 
     /// Inserts a smart pointer whose (possibly unsized) target differs from
     /// the map's output type, returning a key typed with the *source* type
-    /// (e.g. insert a `CastBox<dyn Foo>` into a `dyn Any` map, keeping a
+    /// (e.g. insert a `TypeTaggedBox<dyn Foo>` into a `dyn Any` map, keeping a
     /// `CastKey<dyn Foo>`).
     #[inline]
     pub fn insert_as<SourcePtr>(

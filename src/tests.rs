@@ -4,7 +4,7 @@
 use std::any::Any;
 
 use crate::any_haver::{type_id_from_meta, AnyHaver};
-use crate::cast_box::CastBox;
+use crate::type_tagged_ptr::TypeTaggedBox;
 use crate::cast_key::CastKey;
 use crate::cast_map::BoxCastMap;
 use crate::dyn_key::DynKey;
@@ -30,7 +30,7 @@ fn insert_then_downcast_typed_get() {
     let mut map: AnyMap = AnyMap::new();
     // `insert` erases the concrete `Dog` and hands back the erased-target key;
     // `downcast_key` recovers a `Dog`-typed key.
-    let dyn_key = map.insert(CastBox::new(Dog { name: "Rex".into() }));
+    let dyn_key = map.insert(TypeTaggedBox::new(Dog { name: "Rex".into() }));
     let key = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
     assert_eq!(map.get(key).unwrap().name, "Rex");
     assert_eq!(map.len(), 1);
@@ -44,7 +44,7 @@ fn typed_get_and_downcast_via_upcast() {
     // `map.get(dyn_key)` would not compile. `insert_sized` yields the typed
     // key for the checked get; `upcast` supplies the erased key for
     // `downcast_key`.
-    let key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Fido".into() }));
+    let key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Fido".into() }));
     assert_eq!(map.get(key).unwrap().name, "Fido");
 
     let dyn_key: CastKey<dyn Any> = key.upcast();
@@ -57,7 +57,7 @@ fn typed_get_and_downcast_via_upcast() {
 #[test]
 fn insert_sized_gives_typed_key() {
     let mut map: AnyMap = AnyMap::new();
-    let key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Sz".into() }));
+    let key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Sz".into() }));
     assert_eq!(map.get(key).unwrap().name, "Sz");
 
     // The same slot is reachable through the backing key, type-erased.
@@ -69,7 +69,7 @@ fn insert_sized_gives_typed_key() {
 #[test]
 fn downcast_key_right_and_wrong_type() {
     let mut map: AnyMap = AnyMap::new();
-    let dyn_key = map.insert(CastBox::new(Dog { name: "Spot".into() }));
+    let dyn_key = map.insert(TypeTaggedBox::new(Dog { name: "Spot".into() }));
 
     let recovered: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
     assert_eq!(map.get(recovered).unwrap().name, "Spot");
@@ -82,21 +82,21 @@ fn downcast_key_right_and_wrong_type() {
 #[test]
 fn get_mut_mutates() {
     let mut map: AnyMap = AnyMap::new();
-    let kx = map.insert(CastBox::new(Cat { lives: 9 }));
+    let kx = map.insert(TypeTaggedBox::new(Cat { lives: 9 }));
     let key = map.downcast_key::<Cat>(kx.inner_key()).unwrap();
     map.get_mut(key).unwrap().lives -= 1;
     assert_eq!(map.get(key).unwrap().lives, 8);
 }
 
-// ─── remove returns a re-typed CastBox ───────────────────────────────────────
+// ─── remove returns a re-typed TypeTaggedBox ───────────────────────────────────────
 
 #[test]
 fn remove_returns_boxed_concrete() {
     let mut map: AnyMap = AnyMap::new();
-    let kx = map.insert(CastBox::new(Dog { name: "Bud".into() }));
+    let kx = map.insert(TypeTaggedBox::new(Dog { name: "Bud".into() }));
     let key = map.downcast_key::<Dog>(kx.inner_key()).unwrap();
 
-    let removed: CastBox<Dog> = map.remove(key).unwrap();
+    let removed: TypeTaggedBox<Dog> = map.remove(key).unwrap();
     assert_eq!(removed.name, "Bud");
 
     // The key is now stale (slotmap bumps the slot version on remove).
@@ -109,7 +109,7 @@ fn remove_returns_boxed_concrete() {
 #[test]
 fn remove_wrong_type_is_rejected() {
     let mut map: AnyMap = AnyMap::new();
-    let dog_key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Kept".into() }));
+    let dog_key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Kept".into() }));
 
     // Forge a `Cat`-typed key naming the same slot; the type check refuses it.
     // SAFETY of the test's premise: `from_raw_parts` is the unsafe key-construction
@@ -125,10 +125,10 @@ fn remove_wrong_type_is_rejected() {
 #[test]
 fn stale_key_after_remove_reinsert() {
     let mut map: AnyMap = AnyMap::new();
-    let k1x = map.insert(CastBox::new(Cat { lives: 1 }));
+    let k1x = map.insert(TypeTaggedBox::new(Cat { lives: 1 }));
     let k1 = map.downcast_key::<Cat>(k1x.inner_key()).unwrap();
     let _ = map.remove(k1).unwrap();
-    let k2x = map.insert(CastBox::new(Cat { lives: 2 }));
+    let k2x = map.insert(TypeTaggedBox::new(Cat { lives: 2 }));
     let k2 = map.downcast_key::<Cat>(k2x.inner_key()).unwrap();
 
     // Old key does not alias the new value.
@@ -141,7 +141,7 @@ fn stale_key_after_remove_reinsert() {
 #[test]
 fn clear_invalidates_keys() {
     let mut map: AnyMap = AnyMap::new();
-    let kx = map.insert(CastBox::new(Dog { name: "Rex".into() }));
+    let kx = map.insert(TypeTaggedBox::new(Dog { name: "Rex".into() }));
     let key = map.downcast_key::<Dog>(kx.inner_key()).unwrap();
     map.clear();
     assert!(map.get(key).is_none());
@@ -158,9 +158,9 @@ fn cross_map_wrong_type_is_rejected() {
     let mut a: AnyMap = AnyMap::new();
     let mut b: AnyMap = AnyMap::new();
 
-    let ka: CastKey<Dog> = a.insert_sized(CastBox::new(Dog { name: "A".into() }));
+    let ka: CastKey<Dog> = a.insert_sized(TypeTaggedBox::new(Dog { name: "A".into() }));
     // Same slot index + version in `b`, but holding a Cat.
-    let _kb: CastKey<Cat> = b.insert_sized(CastBox::new(Cat { lives: 9 }));
+    let _kb: CastKey<Cat> = b.insert_sized(TypeTaggedBox::new(Cat { lives: 9 }));
 
     assert!(b.get(ka).is_none());
     assert!(!b.contains_key(ka));
@@ -176,8 +176,8 @@ fn cross_map_same_type_resolves() {
     let mut a: AnyMap = AnyMap::new();
     let mut b: AnyMap = AnyMap::new();
 
-    let ka: CastKey<Dog> = a.insert_sized(CastBox::new(Dog { name: "A".into() }));
-    let _kb: CastKey<Dog> = b.insert_sized(CastBox::new(Dog { name: "B".into() }));
+    let ka: CastKey<Dog> = a.insert_sized(TypeTaggedBox::new(Dog { name: "A".into() }));
+    let _kb: CastKey<Dog> = b.insert_sized(TypeTaggedBox::new(Dog { name: "B".into() }));
 
     // Documented semantics: same slot, same version, same type — the foreign
     // key resolves (to *b*'s value). Safe, if surprising; keep keys with their
@@ -190,7 +190,7 @@ fn cross_map_same_type_resolves() {
 #[test]
 fn contains_key_tracks_liveness() {
     let mut map: AnyMap = AnyMap::new();
-    let kx = map.insert(CastBox::new(Cat { lives: 9 }));
+    let kx = map.insert(TypeTaggedBox::new(Cat { lives: 9 }));
     let key = map.downcast_key::<Cat>(kx.inner_key()).unwrap();
     assert!(map.contains_key(key));
     let _ = map.remove(key);
@@ -202,9 +202,9 @@ fn contains_key_tracks_liveness() {
 #[test]
 fn iter_and_values_and_keys() {
     let mut map: AnyMap = AnyMap::new();
-    map.insert(CastBox::new(Dog { name: "a".into() }));
-    map.insert(CastBox::new(Cat { lives: 1 }));
-    map.insert(CastBox::new(Cat { lives: 2 }));
+    map.insert(TypeTaggedBox::new(Dog { name: "a".into() }));
+    map.insert(TypeTaggedBox::new(Cat { lives: 1 }));
+    map.insert(TypeTaggedBox::new(Cat { lives: 2 }));
 
     assert_eq!(map.iter().count(), 3);
     assert_eq!(map.values().count(), 3);
@@ -223,8 +223,8 @@ fn iter_and_values_and_keys() {
 #[test]
 fn iter_mut_mutates_all() {
     let mut map: AnyMap = AnyMap::new();
-    map.insert(CastBox::new(Cat { lives: 1 }));
-    map.insert(CastBox::new(Cat { lives: 1 }));
+    map.insert(TypeTaggedBox::new(Cat { lives: 1 }));
+    map.insert(TypeTaggedBox::new(Cat { lives: 1 }));
 
     for (_k, v) in map.iter_mut() {
         if let Some(c) = v.downcast_mut::<Cat>() {
@@ -245,9 +245,9 @@ fn iter_mut_mutates_all() {
 #[test]
 fn retain_keeps_matching() {
     let mut map: AnyMap = AnyMap::new();
-    map.insert(CastBox::new(Cat { lives: 1 }));
-    map.insert(CastBox::new(Cat { lives: 9 }));
-    map.insert(CastBox::new(Dog { name: "z".into() }));
+    map.insert(TypeTaggedBox::new(Cat { lives: 1 }));
+    map.insert(TypeTaggedBox::new(Cat { lives: 9 }));
+    map.insert(TypeTaggedBox::new(Dog { name: "z".into() }));
 
     map.retain(|_k, v| v.downcast_ref::<Cat>().map_or(false, |c| c.lives > 5));
     assert_eq!(map.len(), 1);
@@ -259,10 +259,10 @@ fn retain_keeps_matching() {
 #[test]
 fn drain_empties_and_yields() {
     let mut map: AnyMap = AnyMap::new();
-    map.insert(CastBox::new(Cat { lives: 3 }));
-    map.insert(CastBox::new(Cat { lives: 4 }));
+    map.insert(TypeTaggedBox::new(Cat { lives: 3 }));
+    map.insert(TypeTaggedBox::new(Cat { lives: 4 }));
 
-    let drained: Vec<CastBox<dyn Any>> = map.drain().map(|(_k, v)| v).collect();
+    let drained: Vec<TypeTaggedBox<dyn Any>> = map.drain().map(|(_k, v)| v).collect();
     assert_eq!(drained.len(), 2);
     assert!(map.is_empty());
 }
@@ -276,7 +276,7 @@ fn drain_empties_and_yields() {
 #[test]
 fn index_reads() {
     let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
-    let key: CastKey<u32> = map.insert_sized(CastBox::new(41u32));
+    let key: CastKey<u32> = map.insert_sized(TypeTaggedBox::new(41u32));
     // Index is generic over the key's type: a concrete-typed index into a
     // `dyn Any` map yields the concrete reference.
     assert_eq!(map[key], 41);
@@ -295,7 +295,7 @@ fn with_capacity_reserves() {
 
 #[test]
 fn clone_keys_stay_valid() {
-    // A map is `Clone` iff its stored pointer type is. `CastBox` is not
+    // A map is `Clone` iff its stored pointer type is. `TypeTaggedBox` is not
     // `Clone` (its inner `Box<T: ?Sized>` isn't), so the checked box maps are
     // never `Clone`; the unsafe map storing `Box<u32>` is, and demonstrates
     // the shared semantics: checking is by slot version (plus, on the checked
@@ -321,7 +321,7 @@ fn insert_with_key_threads_key() {
     let mut captured = None;
     let dyn_key = map.insert_with_key(|k| {
         captured = Some(k);
-        let boxed: CastBox<dyn Any> = CastBox::new(123u32);
+        let boxed: TypeTaggedBox<dyn Any> = TypeTaggedBox::new(123u32);
         boxed
     });
     assert!(captured.is_some());
@@ -336,7 +336,7 @@ fn insert_sized_with_key_threads_typed_key() {
     let mut captured: Option<CastKey<Dog>> = None;
     let key = map.insert_sized_with_key(|k| {
         captured = Some(k);
-        CastBox::new(Dog { name: "WK".into() })
+        TypeTaggedBox::new(Dog { name: "WK".into() })
     });
     assert_eq!(captured.unwrap(), key);
     assert_eq!(map.get(key).unwrap().name, "WK");
@@ -372,7 +372,7 @@ fn dyn_key_is_send_sync_when_castkey_is() {
 #[test]
 fn dyn_key_round_trips() {
     let mut map: AnyMap = AnyMap::new();
-    let key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "RT".into() }));
+    let key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "RT".into() }));
 
     // Sized target: metadata is `()`; only the smuggled key must round-trip.
     let back = key.as_dyn().key();
@@ -392,7 +392,7 @@ fn dyn_key_round_trips() {
 #[test]
 fn dyn_key_coerced_round_trips() {
     let mut map: AnyMap = AnyMap::new();
-    let dog: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Co".into() }));
+    let dog: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Co".into() }));
 
     // Safe unsizing coercion of the DynKey itself (not of the CastKey);
     // `key()` must still recover a correct `CastKey<dyn Pet>` afterwards.
@@ -405,8 +405,8 @@ fn dyn_key_coerced_round_trips() {
 #[test]
 fn dyn_key_dispatches_virtually() {
     let mut map: AnyMap = AnyMap::new();
-    let dog: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Rex".into() }));
-    let cat: CastKey<Cat> = map.insert_sized(CastBox::new(Cat { lives: 9 }));
+    let dog: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
+    let cat: CastKey<Cat> = map.insert_sized(TypeTaggedBox::new(Cat { lives: 9 }));
 
     // Erase to `dyn Pet` keys; dispatch selects the concrete impl through the
     // vtable carried in the key itself — the map is only consulted *inside*
@@ -429,8 +429,8 @@ fn try_insert_error_is_noop() {
 #[test]
 fn get_disjoint_mut_basic() {
     let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
-    let k1: CastKey<u32> = map.insert(CastBox::new(10u32));
-    let k2: CastKey<u32> = map.insert(CastBox::new(20u32));
+    let k1: CastKey<u32> = map.insert(TypeTaggedBox::new(10u32));
+    let k2: CastKey<u32> = map.insert(TypeTaggedBox::new(20u32));
 
     let [a, b] = map.get_disjoint_mut([k1, k2]).unwrap();
     *a += 1;
@@ -472,8 +472,8 @@ fn slice_target_metadata_roundtrip() {
 #[test]
 fn owned_into_iterator_yields_all() {
     let mut map: AnyMap = AnyMap::new();
-    map.insert(CastBox::new(Cat { lives: 1 }));
-    map.insert(CastBox::new(Cat { lives: 2 }));
+    map.insert(TypeTaggedBox::new(Cat { lives: 1 }));
+    map.insert(TypeTaggedBox::new(Cat { lives: 2 }));
 
     let sum: u32 = map
         .into_iter()
@@ -487,7 +487,7 @@ fn owned_into_iterator_yields_all() {
 #[test]
 fn index_mut_mutates() {
     let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
-    let key: CastKey<u32> = map.insert(CastBox::new(5u32));
+    let key: CastKey<u32> = map.insert(TypeTaggedBox::new(5u32));
     map[key] += 10;
     assert_eq!(map[key], 15);
 }
@@ -544,12 +544,12 @@ fn unsafe_map_detach_reattach() {
 #[test]
 fn insert_as_keeps_source_typed_key() {
     let mut map: AnyMap = AnyMap::new();
-    // `CastBox::new(Dog)` unsizes to `CastBox<dyn Pet>` first; `insert_as`
-    // then coerces that into the map's `CastBox<dyn Any>` (trait upcasting,
+    // `TypeTaggedBox::new(Dog)` unsizes to `TypeTaggedBox<dyn Pet>` first; `insert_as`
+    // then coerces that into the map's `TypeTaggedBox<dyn Any>` (trait upcasting,
     // possible because `Pet: Any`), while the returned key keeps the *source*
     // `dyn Pet` typing — something `insert_sized` (Sized targets only) and
     // `insert` (erased-target key) cannot express.
-    let pet_box: CastBox<dyn Pet> = CastBox::new(Dog { name: "As".into() });
+    let pet_box: TypeTaggedBox<dyn Pet> = TypeTaggedBox::new(Dog { name: "As".into() });
     let key: CastKey<dyn Pet> = map.insert_as(pet_box);
 
     // The checked lookup validates the key's `dyn Pet` vtable (concrete type
@@ -558,7 +558,7 @@ fn insert_as_keeps_source_typed_key() {
     assert_eq!(key.as_dyn().speak(&map), "woof As");
 
     // `remove` re-types the stored box back to the source type.
-    let removed: CastBox<dyn Pet> = map.remove(key).unwrap();
+    let removed: TypeTaggedBox<dyn Pet> = map.remove(key).unwrap();
     assert!(map.is_empty());
     drop(removed);
 }
@@ -572,7 +572,7 @@ fn insert_as_with_key_threads_backing_key() {
     let mut captured = None;
     let key: CastKey<dyn Pet> = map.insert_as_with_key(|k| {
         captured = Some(k);
-        let boxed: CastBox<dyn Pet> = CastBox::new(Cat { lives: 3 });
+        let boxed: TypeTaggedBox<dyn Pet> = TypeTaggedBox::new(Cat { lives: 3 });
         boxed
     });
     assert_eq!(captured.unwrap(), key.inner_key());
@@ -585,7 +585,7 @@ fn insert_as_with_key_threads_backing_key() {
 fn try_insert_sized_error_is_noop() {
     let mut map: AnyMap = AnyMap::new();
     let res: Result<CastKey<Dog>, &str> =
-        map.try_insert_sized_with_key(|_k| Err::<CastBox<Dog>, _>("nope"));
+        map.try_insert_sized_with_key(|_k| Err::<TypeTaggedBox<Dog>, _>("nope"));
     assert_eq!(res.err(), Some("nope"));
     assert!(map.is_empty());
 }
@@ -594,7 +594,7 @@ fn try_insert_sized_error_is_noop() {
 fn try_insert_as_error_is_noop() {
     let mut map: AnyMap = AnyMap::new();
     let res: Result<CastKey<dyn Pet>, &str> =
-        map.try_insert_as_with_key(|_k| Err::<CastBox<dyn Pet>, _>("nope"));
+        map.try_insert_as_with_key(|_k| Err::<TypeTaggedBox<dyn Pet>, _>("nope"));
     assert_eq!(res.err(), Some("nope"));
     assert!(map.is_empty());
 }
@@ -604,7 +604,7 @@ fn try_insert_as_error_is_noop() {
 #[test]
 fn cast_key_of_live_and_stale() {
     let mut map: AnyMap = AnyMap::new();
-    let key: CastKey<Cat> = map.insert_sized(CastBox::new(Cat { lives: 5 }));
+    let key: CastKey<Cat> = map.insert_sized(TypeTaggedBox::new(Cat { lives: 5 }));
 
     // Live slot: metadata is re-read from the stored value.
     let erased = map.cast_key_of(key.inner_key()).unwrap();
@@ -621,7 +621,7 @@ fn cast_key_of_live_and_stale() {
 #[test]
 fn get_disjoint_mut_wrong_type_is_rejected() {
     let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
-    let k: CastKey<u32> = map.insert(CastBox::new(7u32));
+    let k: CastKey<u32> = map.insert(TypeTaggedBox::new(7u32));
 
     // Forge a `Cat`-typed key naming the same live slot; the per-key type-id
     // pre-check must refuse it before any mutable borrow is handed out.
@@ -639,7 +639,7 @@ fn get_disjoint_mut_wrong_type_is_rejected() {
 #[test]
 fn downcast_key_stale_returns_none() {
     let mut map: AnyMap = AnyMap::new();
-    let dog: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "St".into() }));
+    let dog: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "St".into() }));
     let dyn_key: CastKey<dyn Any> = dog.upcast();
 
     let _ = map.remove(dog).unwrap();
@@ -653,7 +653,7 @@ fn downcast_key_stale_returns_none() {
 #[test]
 fn inner_key_mut_helpers_work() {
     let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
-    let k: CastKey<u32> = map.insert(CastBox::new(10u32));
+    let k: CastKey<u32> = map.insert(TypeTaggedBox::new(10u32));
 
     *map.get_by_inner_key_mut(k.inner_key()).unwrap() += 1;
     for v in map.values_mut() {
@@ -661,7 +661,7 @@ fn inner_key_mut_helpers_work() {
     }
     assert_eq!(*map.get(k).unwrap(), 12);
 
-    let removed: CastBox<u32> = map.remove_by_inner_key(k.inner_key()).unwrap();
+    let removed: TypeTaggedBox<u32> = map.remove_by_inner_key(k.inner_key()).unwrap();
     assert_eq!(*removed, 12);
     assert!(map.is_empty());
 }
@@ -672,7 +672,7 @@ fn inner_key_mut_helpers_work() {
 #[should_panic(expected = "invalid CastKey")]
 fn index_panics_on_stale_key() {
     let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
-    let key: CastKey<u32> = map.insert(CastBox::new(1u32));
+    let key: CastKey<u32> = map.insert(TypeTaggedBox::new(1u32));
     let _ = map.remove(key);
     let _ = &map[key];
 }
@@ -685,7 +685,7 @@ mod dense {
     use std::any::Any;
 
     use super::{Cat, Dog};
-    use crate::cast_box::CastBox;
+    use crate::type_tagged_ptr::TypeTaggedBox;
     use crate::cast_key::CastKey;
     use crate::cast_map::BoxDenseCastMap;
     use crate::unsafe_cast_map::UnsafeBoxDenseCastMap;
@@ -696,7 +696,7 @@ mod dense {
     #[test]
     fn insert_then_downcast_typed_get() {
         let mut map: AnyMap = AnyMap::new();
-        let dyn_key = map.insert(CastBox::new(Dog { name: "Rex".into() }));
+        let dyn_key = map.insert(TypeTaggedBox::new(Dog { name: "Rex".into() }));
         let key = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
         assert_eq!(map.get(key).unwrap().name, "Rex");
         assert_eq!(map.len(), 1);
@@ -705,7 +705,7 @@ mod dense {
     #[test]
     fn typed_get_and_downcast_key() {
         let mut map: AnyMap = AnyMap::new();
-        let key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Fido".into() }));
+        let key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Fido".into() }));
         assert_eq!(map.get(key).unwrap().name, "Fido");
 
         let dyn_key: CastKey<dyn Any> = key.upcast();
@@ -717,12 +717,12 @@ mod dense {
     #[test]
     fn get_mut_then_remove_invalidates() {
         let mut map: AnyMap = AnyMap::new();
-        let kx = map.insert(CastBox::new(Cat { lives: 9 }));
+        let kx = map.insert(TypeTaggedBox::new(Cat { lives: 9 }));
         let key = map.downcast_key::<Cat>(kx.inner_key()).unwrap();
         map.get_mut(key).unwrap().lives -= 1;
         assert_eq!(map.get(key).unwrap().lives, 8);
 
-        let removed: CastBox<Cat> = map.remove(key).unwrap();
+        let removed: TypeTaggedBox<Cat> = map.remove(key).unwrap();
         assert_eq!(removed.lives, 8);
         assert!(map.get(key).is_none()); // stale after remove
         assert!(map.is_empty());
@@ -733,8 +733,8 @@ mod dense {
         let mut a: AnyMap = AnyMap::new();
         let mut b: AnyMap = AnyMap::new();
 
-        let ka: CastKey<Dog> = a.insert_sized(CastBox::new(Dog { name: "A".into() }));
-        let _kb: CastKey<Cat> = b.insert_sized(CastBox::new(Cat { lives: 1 }));
+        let ka: CastKey<Dog> = a.insert_sized(TypeTaggedBox::new(Dog { name: "A".into() }));
+        let _kb: CastKey<Cat> = b.insert_sized(TypeTaggedBox::new(Cat { lives: 1 }));
 
         assert!(b.get(ka).is_none());
         assert!(!b.contains_key(ka));
@@ -744,9 +744,9 @@ mod dense {
     #[test]
     fn iter_values_keys_retain() {
         let mut map: AnyMap = AnyMap::new();
-        map.insert(CastBox::new(Dog { name: "a".into() }));
-        map.insert(CastBox::new(Cat { lives: 1 }));
-        map.insert(CastBox::new(Cat { lives: 9 }));
+        map.insert(TypeTaggedBox::new(Dog { name: "a".into() }));
+        map.insert(TypeTaggedBox::new(Cat { lives: 1 }));
+        map.insert(TypeTaggedBox::new(Cat { lives: 9 }));
 
         assert_eq!(map.iter().count(), 3);
         assert_eq!(map.values().count(), 3);
@@ -776,11 +776,11 @@ mod dense {
         use super::Pet;
 
         let mut map: AnyMap = AnyMap::new();
-        let pet_box: CastBox<dyn Pet> = CastBox::new(Dog { name: "D".into() });
+        let pet_box: TypeTaggedBox<dyn Pet> = TypeTaggedBox::new(Dog { name: "D".into() });
         let key: CastKey<dyn Pet> = map.insert_as(pet_box);
         assert_eq!(map.len(), 1);
 
-        let removed: CastBox<dyn Pet> = map.remove(key).unwrap();
+        let removed: TypeTaggedBox<dyn Pet> = map.remove(key).unwrap();
         assert!(map.is_empty());
         drop(removed);
     }
@@ -788,9 +788,9 @@ mod dense {
     #[test]
     fn get_disjoint_mut_typed() {
         let mut map: BoxDenseCastMap<DefaultKey, u32> = BoxDenseCastMap::new();
-        let k1: CastKey<u32> = map.insert(CastBox::new(1u32));
-        let k2: CastKey<u32> = map.insert(CastBox::new(2u32));
-        let k3: CastKey<u32> = map.insert(CastBox::new(3u32));
+        let k1: CastKey<u32> = map.insert(TypeTaggedBox::new(1u32));
+        let k2: CastKey<u32> = map.insert(TypeTaggedBox::new(2u32));
+        let k3: CastKey<u32> = map.insert(TypeTaggedBox::new(3u32));
 
         let [a, b, c] = map.get_disjoint_mut([k1, k2, k3]).unwrap();
         *a += 10;

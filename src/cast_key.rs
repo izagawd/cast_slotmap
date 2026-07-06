@@ -4,7 +4,7 @@
 //! It is the bare key of [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG);
 //! the checked [`CastMapG`](crate::cast_map::CastMapG) uses the *same* key type
 //! and validates lookups against each slot's stored concrete
-//! [`TypeId`](std::any::TypeId) (see [`ConcreteTypeId`](crate::cast_box::ConcreteTypeId)).
+//! [`TypeId`](std::any::TypeId) (see [`ConcreteTypeId`](crate::type_tagged_ptr::ConcreteTypeId)).
 //!
 //! `CastKey` is not a `slotmap::Key`; the map wrappers convert at the boundary
 //! via [`inner_key`](CastKey::inner_key).

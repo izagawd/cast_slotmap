@@ -1,7 +1,7 @@
 //! Castable-key wrappers over the [`slotmap`] crate's
 //! [`SlotMap`](slotmap::SlotMap) and [`DenseSlotMap`](slotmap::DenseSlotMap).
 //!
-//! Store type-erased heterogeneous values (e.g. `CastBox<dyn Any>`) and hand
+//! Store type-erased heterogeneous values (e.g. `TypeTaggedBox<dyn Any>`) and hand
 //! back typed [`CastKey`]s, so `map.get(key)` returns a correctly typed `&T`
 //! with no `downcast_ref` at the call site.
 //!
@@ -16,7 +16,7 @@
 //!   behavior.
 //! - [`CastMap`] — the safe, recommended API over [`slotmap::SlotMap`]. Values
 //!   are stored in a box that records its concrete [`TypeId`](std::any::TypeId)
-//!   (such as [`CastBox`]); every keyed lookup recovers the type id implied by
+//!   (such as [`TypeTaggedBox`], an alias of [`TypeTaggedPtr`]`<Box<T>>`); every keyed lookup recovers the type id implied by
 //!   the key's metadata ([`type_id_from_meta`]) and compares it to the slot's.
 //!   A stale, mistyped, or foreign key returns `None` instead of being unsound.
 //! - [`UnsafeDenseCastMap`] / [`DenseCastMap`] — the same raw/checked pair over
@@ -33,7 +33,7 @@
 //! type aliases that pin `M` to `SlotMap` or `DenseSlotMap`.
 //!
 //! For the common case use the aliases [`BoxCastMap`] / [`BoxDenseCastMap`]
-//! (which store [`CastBox`]) — typically with `dyn Any`:
+//! (which store [`TypeTaggedBox`]) — typically with `dyn Any`:
 //! `BoxCastMap<DefaultKey, dyn Any>`. The raw maps have [`UnsafeBoxCastMap`] /
 //! [`UnsafeBoxDenseCastMap`], storing plain `Box`.
 //!
@@ -62,7 +62,7 @@
 //!
 //! # Example
 //! ```ignore
-//! use cast_slotmap::{BoxCastMap, CastBox, CastKey, DefaultKey};
+//! use cast_slotmap::{BoxCastMap, TypeTaggedBox, CastKey, DefaultKey};
 //! use std::any::Any;
 //!
 //! struct Dog { name: String }
@@ -70,12 +70,12 @@
 //! let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
 //!
 //! // Insert a concrete type into a `dyn Any` map; the key comes back typed.
-//! let dog_key: CastKey<Dog> = map.insert_sized(CastBox::new(Dog { name: "Rex".into() }));
+//! let dog_key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
 //!
 //! assert_eq!(map.get(dog_key).unwrap().name, "Rex");
 //!
 //! // Or insert erased and recover the typed key later.
-//! let dyn_key: CastKey<dyn Any> = map.insert(CastBox::new(Dog { name: "Ax".into() }));
+//! let dyn_key: CastKey<dyn Any> = map.insert(TypeTaggedBox::new(Dog { name: "Ax".into() }));
 //! let typed: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
 //! ```
 #![feature(ptr_metadata)]
@@ -86,12 +86,12 @@
 #![feature(arbitrary_self_types_pointers)]
 
 pub mod any_haver;
-pub mod cast_box;
 pub mod cast_key;
 pub mod cast_map;
 pub mod dyn_key;
 pub mod retype_ptr;
 pub mod slotmap_trait;
+pub mod type_tagged_ptr;
 pub mod unsafe_cast_map;
 
 // Re-export the slotmap items callers need so they don't have to depend on
@@ -100,8 +100,6 @@ pub use slotmap::{new_key_type, DefaultKey, Key, KeyData};
 
 #[doc(inline)]
 pub use any_haver::{type_id_from_meta, AnyHaver};
-#[doc(inline)]
-pub use cast_box::{CastBox, ConcreteTypeId};
 #[doc(inline)]
 pub use cast_key::CastKey;
 #[doc(inline)]
@@ -112,6 +110,8 @@ pub use dyn_key::DynKey;
 pub use retype_ptr::RetypePtr;
 #[doc(inline)]
 pub use slotmap_trait::SlotMapTrait;
+#[doc(inline)]
+pub use type_tagged_ptr::{ConcreteTypeId, TypeTaggedBox, TypeTaggedPtr};
 #[doc(no_inline)]
 pub use stable_deref_trait::StableDeref;
 #[doc(inline)]

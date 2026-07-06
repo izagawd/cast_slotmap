@@ -15,7 +15,7 @@
 //! from data pointer + key metadata sound.
 //!
 //! This safety hinges on a stored type id, so the checked lookups require
-//! `M::Value: ConcreteTypeId` — satisfied by [`CastBox`] (e.g. [`BoxCastMap`])
+//! `M::Value: ConcreteTypeId` — satisfied by [`TypeTaggedBox`] (e.g. [`BoxCastMap`])
 //! or any custom box that implements [`ConcreteTypeId`]. A plain `Box` does
 //! not qualify: `Box<dyn Any>` could ask its value, but for a `Box<dyn Foo>`
 //! where `Foo` is not an `Any` subtrait, `type_id` resolves statically to
@@ -33,12 +33,12 @@
 //! ([`slotmap::SlotMap`] or [`slotmap::DenseSlotMap`]); the backing key and
 //! stored pointer types are read off `M` as `M::Key` and `M::Value`. The
 //! concrete maps are exposed as aliases: [`CastMap`] (sparse) and
-//! [`DenseCastMap`] (dense), plus the [`CastBox`]-storing [`BoxCastMap`] /
+//! [`DenseCastMap`] (dense), plus the [`TypeTaggedBox`]-storing [`BoxCastMap`] /
 //! [`BoxDenseCastMap`].
 //!
 //! `detach` / `reattach` are deliberately **not** offered here: reattaching a
-//! value of a different type would desynchronize the stored type id from the
-//! slot. They live on the unsafe
+//! value of a different concrete type leaves previously issued keys for that
+//! slot with stale cached pointer metadata. They live on the unsafe
 //! [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG), reachable via
 //! [`inner_mut`](CastMapG::inner_mut) if you accept that `unsafe` contract.
 
@@ -50,7 +50,7 @@ use slotmap::{DenseSlotMap, SlotMap};
 use stable_deref_trait::StableDeref;
 
 use crate::any_haver::{type_id_from_meta, AnyHaver};
-use crate::cast_box::{CastBox, ConcreteTypeId};
+use crate::type_tagged_ptr::{TypeTaggedBox, ConcreteTypeId};
 use crate::cast_key::CastKey;
 use crate::retype_ptr::RetypePtr;
 use crate::slotmap_trait::{MTarget, SlotMapTrait};
@@ -62,9 +62,9 @@ use crate::unsafe_cast_map::{self, UnsafeCastMapG};
 /// against each slot's stored concrete [`TypeId`].
 ///
 /// Its one type parameter is the backing `slotmap` map `M`; the stored smart
-/// pointer is `M::Value` (e.g. `CastBox<dyn Any>`) and the output type is
+/// pointer is `M::Value` (e.g. `TypeTaggedBox<dyn Any>`) and the output type is
 /// `<M::Value as Deref>::Target`. Use the aliases [`CastMap`] / [`DenseCastMap`]
-/// (or the [`CastBox`] forms [`BoxCastMap`] / [`BoxDenseCastMap`]) rather than
+/// (or the [`TypeTaggedBox`] forms [`BoxCastMap`] / [`BoxDenseCastMap`]) rather than
 /// naming `M` directly.
 pub struct CastMapG<M> {
     inner: UnsafeCastMapG<M>,
@@ -710,9 +710,9 @@ pub type CastMap<K, Ptr> = CastMapG<SlotMap<K, Ptr>>;
 /// storage, fast iteration).
 pub type DenseCastMap<K, Ptr> = CastMapG<DenseSlotMap<K, Ptr>>;
 
-/// Convenience alias: [`CastMap`] storing [`CastBox<T>`] (e.g. `dyn Any`).
-/// `CastBox` implements [`ConcreteTypeId`], which the checked lookups require.
-pub type BoxCastMap<K, T> = CastMap<K, CastBox<T>>;
+/// Convenience alias: [`CastMap`] storing [`TypeTaggedBox<T>`] (e.g. `dyn Any`).
+/// `TypeTaggedBox` implements [`ConcreteTypeId`], which the checked lookups require.
+pub type BoxCastMap<K, T> = CastMap<K, TypeTaggedBox<T>>;
 
-/// Convenience alias: [`DenseCastMap`] storing [`CastBox<T>`] (e.g. `dyn Any`).
-pub type BoxDenseCastMap<K, T> = DenseCastMap<K, CastBox<T>>;
+/// Convenience alias: [`DenseCastMap`] storing [`TypeTaggedBox<T>`] (e.g. `dyn Any`).
+pub type BoxDenseCastMap<K, T> = DenseCastMap<K, TypeTaggedBox<T>>;
