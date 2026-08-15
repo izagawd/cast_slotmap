@@ -384,6 +384,41 @@ fn dyn_key_round_trips() {
 }
 
 #[test]
+fn cast_key_downcast_without_map() {
+    let mut map: AnyMap = AnyMap::new();
+    let dog_key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
+
+    // Sized keys: the metadata-implied type is the key's own type.
+    assert!(dog_key.downcast::<Dog>().is_some());
+    assert!(dog_key.downcast::<Cat>().is_none());
+
+    // Dyn keys: the concrete type comes out of the vtable, no map involved.
+    let pet_key: CastKey<dyn Pet> = dog_key.upcast();
+    let back: CastKey<Dog> = pet_key.downcast::<Dog>().unwrap();
+    assert_eq!(map.get(back).unwrap().name, "Rex");
+    assert!(pet_key.downcast::<Cat>().is_none());
+
+    // It reads the key, not the map: still answers after removal.
+    map.remove(dog_key).unwrap();
+    assert!(pet_key.downcast::<Dog>().is_some());
+    assert!(map.get(back).is_none());
+}
+
+#[test]
+fn dyn_key_downcast() {
+    let mut map: AnyMap = AnyMap::new();
+    let dog_key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
+    let pet_key: CastKey<dyn Pet> = dog_key.upcast();
+
+    let dk: DynKey<'_, dyn Pet> = pet_key.as_dyn();
+    let dog_dk: DynKey<'_, Dog> = dk.downcast::<Dog>().unwrap();
+    // The downcast result is still dispatchable and still resolves.
+    assert_eq!(dog_dk.speak(&map), "woof Rex");
+    assert_eq!(map.get(dog_dk.key()).unwrap().name, "Rex");
+    assert!(dk.downcast::<Cat>().is_none());
+}
+
+#[test]
 fn dyn_key_coerced_round_trips() {
     let mut map: AnyMap = AnyMap::new();
     let dog: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Co".into() }));

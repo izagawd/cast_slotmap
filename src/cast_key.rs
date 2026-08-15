@@ -13,11 +13,13 @@
 //! value. For dyn dispatch on a key, see [`DynKey`](crate::dyn_key::DynKey) /
 //! [`as_dyn`](CastKey::as_dyn).
 
+use std::any::TypeId;
 use std::ops::Receiver;
 use std::ptr::Pointee;
 
 use slotmap::{DefaultKey, Key, KeyData};
 
+use crate::any_haver::{type_id_from_metadata, AnyHaver};
 use crate::dyn_key::DynKey;
 
 // ─── CastKey<T, K> ───────────────────────────────────────────────────────────
@@ -142,5 +144,18 @@ where
     #[inline]
     pub fn from_raw_parts(key: K, metadata: <T as Pointee>::Metadata) -> Self {
         Self { key, metadata }
+    }
+}
+
+impl<T: ?Sized + AnyHaver + Pointee, K: Key> CastKey<T, K>
+where
+    <T as Pointee>::Metadata: Copy,
+{
+    /// Downcasts to a sized `Concrete` using only the key's cached metadata;
+    /// no map involved. Returns `None` on a type mismatch.
+    #[inline]
+    pub fn downcast<Concrete: 'static>(self) -> Option<CastKey<Concrete, K>> {
+        (type_id_from_metadata::<T>(self.metadata) == TypeId::of::<Concrete>())
+            .then(|| CastKey::from_raw_parts(self.key, ()))
     }
 }

@@ -32,6 +32,7 @@
 //!
 //! The smuggled address is **never dereferenced** on the packed path.
 
+use std::any::TypeId;
 use std::marker::{PhantomData, Unsize};
 use std::num::NonZeroUsize;
 use std::ops::{CoerceUnsized, DispatchFromDyn, Receiver};
@@ -39,6 +40,7 @@ use std::ptr::{NonNull, Pointee};
 
 use slotmap::{DefaultKey, Key, KeyData};
 
+use crate::any_haver::AnyHaver;
 use crate::cast_key::CastKey;
 
 // Compile-time confirmation that the packed form really is `u64`: these fail
@@ -169,6 +171,31 @@ where
             let k = unsafe { thin.cast::<K>().read() };
             CastKey::from_raw_parts(k, metadata)
         }
+    }
+}
+
+impl<'a, T: ?Sized + AnyHaver + Pointee, K: Key> DynKey<'a, T, K>
+where
+    <T as Pointee>::Metadata: Copy,
+{
+    /// Downcasts to a sized `Concrete` using only the key's metadata; no map
+    /// involved. Returns `None` on a type mismatch. See [`CastKey::downcast`].
+    #[inline]
+    pub fn downcast<Concrete: 'static>(self) -> Option<DynKey<'a, Concrete, K>> {
+        // `self.ptr` is already a fat pointer with the right metadata, and
+        // `haver_type_id` never reads the data half, so no null-data pointer
+        // needs building.
+        let fat: *const T = self.ptr.as_ptr();
+        (fat.haver_type_id() == TypeId::of::<Concrete>()).then(|| {
+            let (thin, _) = self.ptr.to_raw_parts();
+            DynKey {
+                // The address half does not depend on `T` (packed `KeyData`,
+                // or a pointer to the `K` field); `Concrete` is sized, so the
+                // new metadata is `()`.
+                ptr: NonNull::from_raw_parts(thin, ()),
+                _borrow: PhantomData,
+            }
+        })
     }
 }
 
