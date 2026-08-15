@@ -11,7 +11,7 @@
 //!
 //! The single method takes a **raw** `*const Self` rather than `&self`, so it
 //! can be invoked on a dangling/null data pointer: only the metadata (vtable)
-//! is consulted. That is what lets [`type_id_from_meta`] turn a
+//! is consulted. That is what lets [`type_id_from_metadata`] turn a
 //! [`CastKey`](crate::cast_key::CastKey)'s stored metadata into a [`TypeId`]
 //! without a live value.
 //!
@@ -47,14 +47,8 @@ pub unsafe trait AnyHaver: 'static {
 // SAFETY: for a sized `T`, `TypeId::of::<Self>()` *is* the concrete type id.
 unsafe impl<T: 'static> AnyHaver for T {}
 
-/// Recovers a [`TypeId`] from a value's pointer `metadata`, without a value.
-///
-/// Builds a `*const T` from a null data address and the supplied metadata,
-/// then asks it for its `TypeId`. The value's memory is never read — the null
-/// data pointer is never dereferenced; for `dyn` metadata the answer comes
-/// from a virtual call through the vtable.
 #[inline]
-pub fn type_id_from_meta<T: ?Sized + AnyHaver + Pointee>(
+pub fn type_id_from_metadata<T: ?Sized + AnyHaver + Pointee>(
     metadata: <T as Pointee>::Metadata,
 ) -> TypeId {
     let fat: *const T = std::ptr::from_raw_parts(std::ptr::null::<()>(), metadata);

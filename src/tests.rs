@@ -3,7 +3,7 @@
 
 use std::any::Any;
 
-use crate::any_haver::{type_id_from_meta, AnyHaver};
+use crate::any_haver::{type_id_from_metadata, AnyHaver};
 use crate::type_tagged_ptr::TypeTaggedBox;
 use crate::cast_key::CastKey;
 use crate::cast_map::BoxCastMap;
@@ -378,8 +378,8 @@ fn dyn_key_round_trips() {
     let pet_back = pet_key.as_dyn().key();
     assert_eq!(pet_back, pet_key);
     assert_eq!(
-        type_id_from_meta::<dyn Pet>(pet_back.metadata()),
-        type_id_from_meta::<dyn Pet>(pet_key.metadata()),
+        type_id_from_metadata::<dyn Pet>(pet_back.metadata()),
+        type_id_from_metadata::<dyn Pet>(pet_key.metadata()),
     );
 }
 

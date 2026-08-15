@@ -1,11 +1,12 @@
-//! [`DynKey`]: a [`CastKey`](crate::cast_key::CastKey) borrowed into a shape
+//! [`DynKey`] is a [`CastKey`](crate::cast_key::CastKey) that is in a shape
 //! that can be a **method receiver on trait objects**.
 //!
 //! A dyn-dispatch receiver must be exactly the size and shape of a pointer,
 //! and `CastKey` cannot guarantee that: *pointer* size varies by target
 //! (32- vs 64-bit) while the key is a fixed 8 bytes — and `slotmap` plans to
-//! let users pick the size of their keys — so the key cannot be relied on to
+//! let users pick the size of their keys in the future, so the key cannot be relied on to
 //! fit in, or match, a pointer.
+//! 
 //! `DynKey` re-expresses the same information as a single fat
 //! [`NonNull<T>`](std::ptr::NonNull):
 //! the *metadata* half carries the key's pointer metadata (the vtable for

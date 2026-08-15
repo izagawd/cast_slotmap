@@ -5,7 +5,7 @@
 //! caller must promise the key's metadata fits the slot), [`CastMapG`] makes
 //! them safe: every value sits behind a stored pointer that records its
 //! concrete [`TypeId`] (see [`ConcreteTypeId`]), and a lookup recovers the type id
-//! implied by the key's metadata (via [`type_id_from_meta`]) and compares it to
+//! implied by the key's metadata (via [`type_id_from_metadata`]) and compares it to
 //! the slot's. A mismatch — wrong type or recycled slot — returns `None`
 //! instead of risking UB.
 //!
@@ -50,7 +50,7 @@ use std::ptr::Pointee;
 use slotmap::{DenseSlotMap, SlotMap};
 use stable_deref_trait::StableDeref;
 
-use crate::any_haver::{type_id_from_meta, AnyHaver};
+use crate::any_haver::{type_id_from_metadata, AnyHaver};
 use crate::type_tagged_ptr::{TypeTaggedBox, ConcreteTypeId};
 use crate::cast_key::CastKey;
 use crate::retype_ptr::RetypePtr;
@@ -458,7 +458,7 @@ where
         let stored = self.inner.inner.get(key.inner_key())?;
         let stored_tid = stored.concrete_type_id();
         let base: &MTarget<M> = &**stored;
-        if stored_tid != type_id_from_meta::<T>(key.metadata()) {
+        if stored_tid != type_id_from_metadata::<T>(key.metadata()) {
             return None;
         }
         let data: *const () = (base as *const MTarget<M>).cast();
@@ -494,7 +494,7 @@ where
         M::Value: RetypePtr<'a>,
     {
         let stored = self.inner.inner.get(key.inner_key())?;
-        if stored.concrete_type_id() != type_id_from_meta::<T>(key.metadata()) {
+        if stored.concrete_type_id() != type_id_from_metadata::<T>(key.metadata()) {
             return None;
         }
         // SAFETY: the type-id check just proved the key's metadata is valid
@@ -523,7 +523,7 @@ where
         <T as Pointee>::Metadata: Copy,
     {
         let stored = self.inner.inner.get_mut(key.inner_key())?;
-        if stored.concrete_type_id() != type_id_from_meta::<T>(key.metadata()) {
+        if stored.concrete_type_id() != type_id_from_metadata::<T>(key.metadata()) {
             return None;
         }
         let base: &mut MTarget<M> = &mut **stored;
@@ -580,7 +580,7 @@ where
         // liveness and pairwise disjointness.
         for key in &keys {
             let stored = self.inner.inner.get(key.inner_key())?;
-            if stored.concrete_type_id() != type_id_from_meta::<T>(key.metadata()) {
+            if stored.concrete_type_id() != type_id_from_metadata::<T>(key.metadata()) {
                 return None;
             }
         }

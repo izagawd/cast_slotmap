@@ -7,10 +7,7 @@
 //! generic over the backing map, instead of being duplicated per map kind.
 //!
 //! Two maps are provided: [`slotmap::SlotMap`] and [`slotmap::DenseSlotMap`];
-//! both implement the whole of [`SlotMapTrait`] (including `detach` / `reattach`,
-//! which `slotmap` offers on both), so a single trait covers them with no
-//! sub-trait. A map lacking `detach` / `reattach` — such as `slotmap::HopSlotMap`
-//! — would need those split into an optional sub-trait before it could be added.
+//! both implement the whole of [`SlotMapTrait`]
 //!
 //! The method names here intentionally differ from `slotmap`'s where they would
 //! otherwise collide with an inherent method during delegation (`empty` /
@@ -110,9 +107,9 @@ pub trait SlotMapTrait: Sized {
     fn into_pairs(self) -> Self::IntoIter;
 
     /// Temporarily removes a value, leaving the slot reservable for
-    /// [`reattach`](Self::reattach). Both [`slotmap::SlotMap`] and
-    /// [`slotmap::DenseSlotMap`] support this.
+    /// [`reattach`](Self::reattach)
     fn detach(&mut self, key: Self::Key) -> Option<Self::Value>;
+
     /// Reattaches a value at a detached slot, reusing `detached_key`.
     ///
     /// # Panics

@@ -18,7 +18,7 @@
 //!   are stored behind a type-tagged pointer that records their concrete
 //!   [`TypeId`](std::any::TypeId) (such as [`TypeTaggedBox`], an alias of
 //!   [`TypeTaggedPtr`]`<Box<T>>`); every keyed lookup recovers the type id implied by
-//!   the key's metadata ([`type_id_from_meta`]) and compares it to the slot's.
+//!   the key's metadata ([`type_id_from_metadata`]) and compares it to the slot's.
 //!   A stale, mistyped, or foreign key returns `None` instead of being unsound.
 //! - [`UnsafeDenseCastMap`] / [`DenseCastMap`] — the same raw/checked pair over
 //!   [`slotmap::DenseSlotMap`], which stores values contiguously for fast
@@ -100,7 +100,7 @@ pub mod unsafe_cast_map;
 pub use slotmap::{new_key_type, DefaultKey, Key, KeyData};
 
 #[doc(inline)]
-pub use any_haver::{type_id_from_meta, AnyHaver};
+pub use any_haver::{type_id_from_metadata, AnyHaver};
 #[doc(inline)]
 pub use cast_key::CastKey;
 #[doc(inline)]
