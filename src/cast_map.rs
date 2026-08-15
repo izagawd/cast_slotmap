@@ -36,13 +36,6 @@
 //! concrete maps are exposed as aliases: [`CastMap`] (sparse) and
 //! [`DenseCastMap`] (dense), plus the [`TypeTaggedBox`]-storing [`BoxCastMap`] /
 //! [`BoxDenseCastMap`].
-//!
-//! `detach` / `reattach` are deliberately **not** offered here: reattaching a
-//! value of a different concrete type leaves previously issued keys for that
-//! slot with stale cached pointer metadata. They live on the unsafe
-//! [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG), reachable via
-//! [`inner_mut`](CastMapG::inner_mut) if you accept that `unsafe` contract.
-
 use std::any::{Any, TypeId};
 use std::ops::{Deref, DerefMut};
 use std::ptr::Pointee;
@@ -198,6 +191,26 @@ where
     #[inline]
     pub fn remove_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
         self.inner.remove_by_inner_key(key)
+    }
+
+    /// Detaches an element by its backing `slotmap` key, returning the stored
+    /// pointer but keeping the slot reservable so the key can be reused with
+    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key). Forwards to
+    /// `slotmap`'s `detach`, which both `SlotMap` and `DenseSlotMap` provide.
+    #[inline]
+    pub fn detach_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
+        self.inner.detach_by_inner_key(key)
+    }
+
+    /// Reattaches `value` at a slot previously freed with
+    /// [`detach_by_inner_key`](Self::detach_by_inner_key), reusing `key`.
+    ///
+    /// # Panics
+    /// Panics if `key` is not in a detached state (and, for dense storage, if
+    /// the map is full), mirroring `slotmap`'s `reattach`.
+    #[inline]
+    pub fn reattach_by_inner_key(&mut self, key: M::Key, value: M::Value) {
+        self.inner.reattach_by_inner_key(key, value);
     }
 
     /// Shared iterator over output references only.
@@ -500,6 +513,30 @@ where
         // SAFETY: the type-id check just proved the key's metadata is valid
         // for the value in that slot.
         unsafe { self.inner.remove(key) }
+    }
+
+    /// Detaches an element by its [`CastKey`], returning the owned smart
+    /// pointer re-typed to `T`. Unlike [`remove`](Self::remove) the slot stays
+    /// reservable: the same key can be reused with
+    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key). Returns
+    /// `None`, and detaches nothing, if the key is stale or its type does not
+    /// match the slot.
+    #[inline]
+    pub fn detach<'a, T: ?Sized + AnyHaver + Pointee>(
+        &mut self,
+        key: CastKey<T, M::Key>,
+    ) -> Option<<M::Value as RetypePtr<'a>>::Retyped<T>>
+    where
+        <T as Pointee>::Metadata: Copy,
+        M::Value: RetypePtr<'a>,
+    {
+        let stored = self.inner.inner.get(key.inner_key())?;
+        if stored.concrete_type_id() != type_id_from_metadata::<T>(key.metadata()) {
+            return None;
+        }
+        // SAFETY: the type-id check just proved the key's metadata is valid
+        // for the value in that slot.
+        unsafe { self.inner.detach(key) }
     }
 }
 

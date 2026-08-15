@@ -515,11 +515,10 @@ fn unsafe_map_detach_reattach() {
     assert!(unsafe { map.get(key) }.is_none());
     assert!(map.is_empty());
 
-    // Reattach the (mutated) value. `reattach` takes the map's erased-target
-    // key, so upcast the typed `CastKey<Dog>` to `CastKey<dyn Any>`; the
-    // `Box<Dog>` value unsizes to `Box<dyn Any>` at the call site.
+    // Reattach the (mutated) value under the same key; the `Box<Dog>` value
+    // unsizes to `Box<dyn Any>` at the call site.
     dog.name = "Max".into();
-    map.reattach(key.upcast::<dyn Any>(), dog);
+    map.reattach_by_inner_key(key.inner_key(), dog);
     // SAFETY: a `Dog` is back in the slot, so `key`'s metadata is still correct.
     assert_eq!(unsafe { map.get(key) }.unwrap().name, "Max");
     assert_eq!(map.len(), 1);
@@ -531,6 +530,40 @@ fn unsafe_map_detach_reattach() {
     map.reattach_by_inner_key(ik, Box::new(Dog { name: "Zed".into() }) as Box<dyn Any>);
     // SAFETY: still a `Dog`, so `key`'s metadata remains valid.
     assert_eq!(unsafe { map.get(key) }.unwrap().name, "Zed");
+}
+
+#[test]
+fn checked_map_detach_reattach() {
+    let mut map: AnyMap = AnyMap::new();
+    let key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
+
+    // Typed, checked detach: type-id validated, hands back the re-typed
+    // tagged pointer, and keeps the slot reservable.
+    let mut dog: TypeTaggedBox<Dog> = map.detach(key).unwrap();
+    assert_eq!(dog.name, "Rex");
+    assert!(map.get(key).is_none());
+    assert!(map.is_empty());
+
+    // Reattach the (mutated) value under the same key; the old typed key
+    // resolves again since the types still match.
+    dog.name = "Max".into();
+    map.reattach_by_inner_key(key.inner_key(), dog);
+    assert_eq!(map.get(key).unwrap().name, "Max");
+    assert_eq!(map.len(), 1);
+
+    // Reattach a *different* concrete type: the old `Dog` key stops
+    // matching while a `Cat` key resolves.
+    let ik = key.inner_key();
+    let erased: TypeTaggedBox<dyn Any> = map.detach_by_inner_key(ik).unwrap();
+    assert_eq!(erased.downcast_ref::<Dog>().unwrap().name, "Max");
+    map.reattach_by_inner_key(ik, TypeTaggedBox::new(Cat { lives: 9 }));
+    assert!(map.get(key).is_none());
+    let cat_key = map.downcast_key::<Cat>(ik).unwrap();
+    assert_eq!(map.get(cat_key).unwrap().lives, 9);
+
+    // A mistyped detach returns `None` and leaves the value in place.
+    assert!(map.detach(key).is_none());
+    assert_eq!(map.len(), 1);
 }
 
 // ─── insert_as: source-typed keys for already-unsized pointers ───────────────

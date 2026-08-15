@@ -19,12 +19,7 @@
 //!
 //! ## Relationship to `slotmap`
 //! Every method forwards to the backing `slotmap` map through the
-//! [`SlotMapTrait`](crate::slotmap_trait::SlotMapTrait) trait. `detach` /
-//! `reattach` are exposed here (both `slotmap` maps support them) but **not**
-//! on the checked [`CastMapG`](crate::cast_map::CastMapG): reattaching a
-//! different concrete type under an existing key leaves that key's cached
-//! pointer metadata stale — a hazard this map can carry, since only its
-//! `unsafe` typed accessors could ever act on that stale metadata.
+//! [`SlotMapTrait`](crate::slotmap_trait::SlotMapTrait) trait.
 
 use std::collections::TryReserveError;
 use std::ops::{Deref, DerefMut};
@@ -670,15 +665,7 @@ where
 
     /// Reattaches an already-erased `value` (e.g. a `Box<dyn Any>`) at a slot
     /// previously freed with [`detach_by_inner_key`](Self::detach_by_inner_key),
-    /// reusing `key`. Use [`reattach`](Self::reattach) to pass a [`CastKey`]
-    /// rather than a raw backing key.
-    ///
-    /// Reattaching a value whose concrete type differs from the original leaves
-    /// any [`CastKey`] previously issued for that slot with stale pointer
-    /// metadata; using such a key with the `unsafe` typed accessors is then
-    /// undefined behavior. This hazard is why `reattach` lives only on the
-    /// unsafe map and not on the checked
-    /// [`CastMapG`](crate::cast_map::CastMapG).
+    /// reusing `key`.
     ///
     /// # Panics
     /// Panics if `key` is not in a detached state (and, for dense storage, if
@@ -689,7 +676,7 @@ where
     }
 }
 
-// ─── detach / reattach (cast key) ────────────────────────────────
+// ─── detach (cast key) ───────────────────────────────────────────
 
 impl<M> UnsafeCastMapG<M>
 where
@@ -701,8 +688,7 @@ where
     /// Detaches an element by its [`CastKey`], returning the owned smart pointer
     /// re-typed to `T` (so a `Box<dyn Any>` map hands back a `Box<T>`). Unlike
     /// [`remove`](Self::remove) the slot stays reservable: the same key can be
-    /// reused with [`reattach`](Self::reattach) or
-    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key) (erased pointer).
+    /// reused with [`reattach_by_inner_key`](Self::reattach_by_inner_key).
     ///
     /// # Safety
     /// The key's pointer metadata must be valid for the data stored at that slot.
@@ -717,29 +703,6 @@ where
     {
         let stored = self.inner.detach(key.inner_key())?;
         Some(stored.retype::<T>(key.metadata()))
-    }
-
-    /// Reattaches `value` at a slot freed with [`detach`](Self::detach), reusing
-    /// `key`. `value` is the pointer the backing `slotmap` stores directly
-    /// (`M::Value`, e.g. `Box<dyn Any>`); a concrete pointer like `Box<Dog>`
-    /// unsizes to it implicitly at the call site. `key` is the output-typed
-    /// [`CastKey`] the map itself issues — `CastKey<MTarget<M>, M::Key>`, as
-    /// returned by [`insert`](Self::insert), [`keys`](Self::keys), or
-    /// [`cast_key_of`](Self::cast_key_of); a concrete-typed key reaches it
-    /// via [`CastKey::upcast`](crate::cast_key::CastKey::upcast).
-    ///
-    /// Reattaching a value of a different concrete type than the slot last held
-    /// leaves any retained [`CastKey`] with stale metadata; using such a key with
-    /// the `unsafe` typed accessors is then undefined behavior — the same hazard
-    /// as [`reattach_by_inner_key`](Self::reattach_by_inner_key), and why neither
-    /// is offered on the checked [`CastMapG`](crate::cast_map::CastMapG).
-    ///
-    /// # Panics
-    /// Panics if `key` is not detached (and, for dense storage, if the map is
-    /// full).
-    #[inline]
-    pub fn reattach(&mut self, key: CastKey<MTarget<M>, M::Key>, value: M::Value) {
-        self.inner.reattach(key.inner_key(), value);
     }
 }
 

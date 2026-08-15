@@ -15,7 +15,7 @@
 //! [`CastKey`](crate::cast_key::CastKey)'s stored metadata into a [`TypeId`]
 //! without a live value.
 //!
-//! Dispatch summary for `type_id_from_meta::<T>(meta)`:
+//! Dispatch summary for `type_id_from_metadata::<T>(meta)`:
 //! - `T` sized          → `TypeId::of::<T>()`              (static, metadata is `()`)
 //! - `T = dyn AnyHaver` → the *concrete* type's `TypeId`   (virtual, via the vtable)
 //! - `T = dyn Foo` where `Foo: AnyHaver` → the concrete type's `TypeId` through
