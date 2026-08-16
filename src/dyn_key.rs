@@ -1,39 +1,6 @@
-//! [`DynKey`] is a [`CastKey`](crate::cast_key::CastKey) that is in a shape
-//! that can be a **method receiver on trait objects**.
-//!
-//! A dyn-dispatch receiver must be exactly the size and shape of a pointer,
-//! and `CastKey` cannot guarantee that: *pointer* size varies by target
-//! (32- vs 64-bit) while the key is a fixed 8 bytes — and `slotmap` plans to
-//! let users pick the size of their keys in the future, so the key cannot be relied on to
-//! fit in, or match, a pointer.
-//! 
-//! `DynKey` re-expresses the same information as a single fat
-//! [`NonNull<T>`](std::ptr::NonNull):
-//! the *metadata* half carries the key's pointer metadata (the vtable for
-//! `dyn` targets), and the *address* half smuggles the backing `slotmap` key.
-//! That makes `DynKey` layout-compatible with dyn dispatch, so traits can
-//! declare methods as `fn m(self: DynKey<Self>, ...)` and be called through
-//! `DynKey<dyn Trait>`.
-//!
-//! Which representation the address holds is decided by a compile-time check
-//! of the actual types involved (`u64` being the packed form's type,
-//! confirmed at compile time against `as_ffi` / `from_ffi`):
-//! - **`size_of::<u64>() <= size_of::<usize>()`:** the address is the
-//!   key's packed [`KeyData`] via [`KeyData::as_ffi`] — zero-extended when
-//!   the address is wider (e.g. a 128-bit target) — relying on its
-//!   documented guarantee (round-tripping through [`KeyData::from_ffi`])
-//!   plus its current packing keeping the value nonzero, never the key's
-//!   byte layout, which could contain padding.
-//! - **Otherwise** (e.g. a 32-bit target): the address is a real pointer to
-//!   the borrowed key's backing `K` field, which the `'a` borrow keeps
-//!   alive. Only `K` is read back (its type is the same for every `T`); the
-//!   metadata always travels in the fat pointer itself, where unsizing
-//!   coercions keep it correct.
-//!
-//! The smuggled address is **never dereferenced** on the packed path.
-
 use std::any::TypeId;
 use std::marker::{PhantomData, Unsize};
+use std::mem::MaybeUninit;
 use std::num::NonZeroUsize;
 use std::ops::{CoerceUnsized, DispatchFromDyn, Receiver};
 use std::ptr::{NonNull, Pointee};
@@ -43,18 +10,11 @@ use slotmap::{DefaultKey, Key, KeyData};
 use crate::any_haver::AnyHaver;
 use crate::cast_key::CastKey;
 
-// Compile-time confirmation that the packed form really is `u64`: these fail
-// to compile if `as_ffi` / `from_ffi` ever change signature. The check below
-// compares `u64` — the type that actually crosses — against the pointer size.
-const _: fn(KeyData) -> u64 = KeyData::as_ffi;
-const _: fn(u64) -> KeyData = KeyData::from_ffi;
 
-/// Does a packed key (a `u64`, confirmed above) fit in a pointer address —
-/// equal in size, or smaller (e.g. a 128-bit target)? Decided from the types
-/// themselves, per target.
+/// Does `K` fit in a pointer address on this target?
 #[inline]
-const fn packs_in_ptr() -> bool {
-    size_of::<u64>() <= size_of::<usize>()
+const fn packs_in_ptr<K>() -> bool {
+    size_of::<K>() <= size_of::<usize>()
 }
 
 /// A borrowed, dyn-dispatchable form of a [`CastKey`].
@@ -71,8 +31,8 @@ const fn packs_in_ptr() -> bool {
 /// dk.tick(&mut world); // virtual call through the key's metadata
 /// ```
 pub struct DynKey<'a, T: ?Sized, K: Key = DefaultKey> {
-    /// Address = packed `KeyData` (or a pointer to the borrowed key's `K`
-    /// field when packing does not fit); metadata = the `CastKey`'s pointer
+    /// Address = the key's raw bytes (or a pointer to the borrowed key's `K`
+    /// field if a key's size doesn't fit a pointer address); metadata = the `CastKey`'s pointer
     /// metadata. Never dereferenced as a `T`.
     ptr: NonNull<T>,
     _borrow: PhantomData<&'a K>,
@@ -107,11 +67,11 @@ where
 // Dyn-dispatch machinery: `DynKey` is a single (fat) pointer plus 1-ZSTs, the
 // exact shape `DispatchFromDyn` requires of a receiver.
 impl<'a, T: ?Sized + Unsize<U>, U: ?Sized, K: Key> CoerceUnsized<DynKey<'a, U, K>>
-    for DynKey<'a, T, K>
+for DynKey<'a, T, K>
 {
 }
 impl<'a, T: ?Sized + Unsize<U>, U: ?Sized, K: Key> DispatchFromDyn<DynKey<'a, U, K>>
-    for DynKey<'a, T, K>
+for DynKey<'a, T, K>
 {
 }
 
@@ -128,14 +88,12 @@ where
     /// Borrows a [`CastKey`] into its dyn-dispatchable form.
     #[inline]
     pub fn new(key: &'a CastKey<T, K>) -> Self {
-        let thin: NonNull<()> = if const { packs_in_ptr() } {
-            // Packed `as_ffi` value as the address (zero-extends if `usize`
-            // is wider); pure data, never dereferenced.
-            // SAFETY: `as_ffi` packs the key's `NonZeroU32` version into the
-            // high 32 bits, so it is never 0, and on this path `usize` is at
-            // least 64 bits wide, so the cast cannot drop those bits.
+        let thin: NonNull<()> = if const { packs_in_ptr::<K>() } {
+            // SAFETY: it is never dereferenced, just stored as a pointer (not in a pointer)
             let addr = unsafe {
-                NonZeroUsize::new_unchecked(key.inner_key().data().as_ffi() as usize)
+                let mut bits = MaybeUninit::<usize>::zeroed();
+                bits.as_mut_ptr().cast::<K>().write_unaligned(key.key);
+                NonZeroUsize::new_unchecked(bits.assume_init())
             };
             NonNull::without_provenance(addr)
         } else {
@@ -157,17 +115,15 @@ where
     #[inline]
     pub fn key(self) -> CastKey<T, K> {
         let (thin, metadata) = self.ptr.to_raw_parts();
-        if const { packs_in_ptr() } {
-            // `from_ffi(as_ffi(k)) == k` is the documented round-trip
-            // guarantee; nothing about the value's layout is relied on.
-            let key = K::from(KeyData::from_ffi(thin.addr().get() as u64));
+        if const { packs_in_ptr::<K>() } {
+            // SAFETY: reads the first `size_of::<K>()` bytes of `thin`
+            // itself, which is guaranteed to be K
+            let key: K = unsafe { core::mem::transmute_copy(&thin) };
             CastKey::from_raw_parts(key, metadata)
         } else {
-            // SAFETY: on this path `thin` points at the `K` field of the
-            // `CastKey` borrowed by `new`, still alive for 'a; `K` is `Copy`
-            // and its type does not depend on `T`. The metadata comes from
-            // the fat pointer, which unsizing coercions keep correct for the
-            // current `T`.
+            // SAFETY: on this path, `thin` points at the `K` field of the
+            // `CastKey` borrowed by `new`, which is still alive, represented by the lifetime 'a.
+            // `K` is `Copy`, so reading it using unsafe is also fine
             let k = unsafe { thin.cast::<K>().read() };
             CastKey::from_raw_parts(k, metadata)
         }
@@ -189,9 +145,8 @@ where
         (fat.haver_type_id() == TypeId::of::<Concrete>()).then(|| {
             let (thin, _) = self.ptr.to_raw_parts();
             DynKey {
-                // The address half does not depend on `T` (packed `KeyData`,
-                // or a pointer to the `K` field); `Concrete` is sized, so the
-                // new metadata is `()`.
+                // The address half does not depend on `T`
+                // `Concrete` is sized, so the new metadata is `()`.
                 ptr: NonNull::from_raw_parts(thin, ()),
                 _borrow: PhantomData,
             }
