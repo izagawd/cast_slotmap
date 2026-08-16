@@ -47,7 +47,7 @@ trait Component: AnyHaver { /* … */ }   // puts the lookup in dyn Component's 
 
 ## `DynKey`: keys that work with dyn dispatch
 
-A method receiver for dyn dispatch must have exactly the size and shape of a pointer, and `CastKey` cannot promise that. Pointer size depends on the target (32 vs 64 bit) while the key is always 8 bytes, and `slotmap` plans to let users pick the size of their keys, so the key cannot be trusted to fit in, or match, a pointer. Instead, `CastKey::as_dyn` borrows the key as a `DynKey<'_, T>`: a single fat `NonNull`. Its metadata half is the key's vtable. Its address half packs the backing `slotmap` key when the size of the key is <= the size of a memory address, which is checked per target at compile time. When it does not fit, it points at the borrowed key instead. That makes it a valid **method receiver** for trait objects:
+A method receiver for dyn dispatch must have exactly the size and shape of a pointer, and `CastKey` cannot promise that. Pointer size depends on the target (32 vs 64 bit) while the key is always 8 bytes, and `slotmap` plans to let users pick the size of their keys, so the key cannot be trusted to fit in, or match, a pointer. Instead, `CastKey::as_dyn` borrows the key as a `DynKey<'_, T>`: a single fat `NonNull`. Its metadata half is the key's vtable. Its address half packs the backing `slotmap` key (its `u64` `as_ffi` form) when `size_of::<u64>() <= size_of::<usize>()`, which is checked per target at compile time. When it does not fit, it points at the borrowed key instead. That makes it a valid **method receiver** for trait objects:
 
 ```rust
 trait Component: AnyHaver {
